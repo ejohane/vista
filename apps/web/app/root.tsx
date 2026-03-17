@@ -7,21 +7,9 @@ import {
   ScrollRestoration,
 } from "react-router";
 
+import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Route } from "./+types/root";
 import "./app.css";
-
-export const links: Route.LinksFunction = () => [
-  { rel: "preconnect", href: "https://fonts.googleapis.com" },
-  {
-    rel: "preconnect",
-    href: "https://fonts.gstatic.com",
-    crossOrigin: "anonymous",
-  },
-  {
-    rel: "stylesheet",
-    href: "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap",
-  },
-];
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -32,8 +20,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Meta />
         <Links />
       </head>
-      <body className="antialiased">
-        {children}
+      <body className="bg-background text-foreground antialiased">
+        <TooltipProvider>{children}</TooltipProvider>
         <ScrollRestoration />
         <Scripts />
       </body>
@@ -63,17 +51,19 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
 
   return (
     <main className="mx-auto min-h-screen max-w-5xl px-6 py-16">
-      <div className="rounded-[2rem] border border-border/70 bg-card/90 p-8 shadow-[0_24px_80px_rgba(20,32,43,0.12)] backdrop-blur">
+      <div className="rounded-3xl border border-border/70 bg-card/95 p-8 shadow-sm">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">
           Vista
         </p>
-        <h1 className="mt-3 font-display text-4xl text-balance">{message}</h1>
+        <h1 className="mt-3 text-4xl font-semibold tracking-tight text-balance">
+          {message}
+        </h1>
         <p className="mt-4 max-w-2xl text-base text-muted-foreground">
           {details}
         </p>
       </div>
       {stack && (
-        <pre className="mt-6 w-full overflow-x-auto rounded-[1.5rem] border border-border/70 bg-card/90 p-4">
+        <pre className="mt-6 w-full overflow-x-auto rounded-3xl border border-border/70 bg-card/95 p-4">
           <code>{stack}</code>
         </pre>
       )}
