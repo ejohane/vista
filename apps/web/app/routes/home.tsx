@@ -34,7 +34,13 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { formatCompactUsd, formatUpdatedAt, formatUsd } from "@/lib/format";
+import {
+  formatCompactUsd,
+  formatSignedUsd,
+  formatUpdatedAt,
+  formatUsd,
+} from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { Route } from "./+types/home";
 
 type AccountGroup = {
@@ -47,6 +53,29 @@ type AccountGroup = {
   key: string;
   label: string;
   totalMinor: number;
+};
+
+type ReadyChangeSummary = {
+  cashDeltaMinor: number;
+  changedAccounts: Array<{
+    accountType: string;
+    deltaMinor: number;
+    id: string;
+    institutionName: string;
+    latestBalanceMinor: number;
+    name: string;
+    previousBalanceMinor: number;
+  }>;
+  changedGroups: Array<{
+    deltaMinor: number;
+    key: string;
+    label: string;
+    latestTotalMinor: number;
+    previousTotalMinor: number;
+  }>;
+  comparedToCompletedAt: string;
+  investmentsDeltaMinor: number;
+  netWorthDeltaMinor: number;
 };
 
 function getGroupSectionId(key: string) {
@@ -85,6 +114,25 @@ function filterAccountGroups(groups: AccountGroup[], query: string) {
   });
 }
 
+function buildChangeSummaryDetail(changeSummary: ReadyChangeSummary) {
+  const largestGroup = changeSummary.changedGroups[0];
+  const leadingAccounts = changeSummary.changedAccounts
+    .slice(0, 2)
+    .map((account) => account.name);
+
+  if (!largestGroup) {
+    return `Compared with ${formatUpdatedAt(changeSummary.comparedToCompletedAt)}, balances were effectively flat across the tracked account groups.`;
+  }
+
+  const direction = largestGroup.deltaMinor > 0 ? "higher" : "lower";
+  const accountsText =
+    leadingAccounts.length > 0
+      ? `, led by ${leadingAccounts.join(" and ")}`
+      : "";
+
+  return `${largestGroup.label} drove the biggest move ${direction} compared with ${formatUpdatedAt(changeSummary.comparedToCompletedAt)}${accountsText}.`;
+}
+
 function MetricCard({
   detail,
   icon,
@@ -113,6 +161,31 @@ function MetricCard({
         <p className="text-sm leading-6 text-muted-foreground">{detail}</p>
       </CardContent>
     </Card>
+  );
+}
+
+function DeltaBadge({
+  deltaMinor,
+  label,
+}: {
+  deltaMinor: number;
+  label: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-border/70 bg-background/80 p-4">
+      <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
+        {label}
+      </p>
+      <p
+        className={cn(
+          "mt-3 text-2xl font-semibold tracking-tight",
+          deltaMinor > 0 && "text-emerald-700",
+          deltaMinor < 0 && "text-rose-700",
+        )}
+      >
+        {formatSignedUsd(deltaMinor)}
+      </p>
+    </div>
   );
 }
 
@@ -164,6 +237,13 @@ export async function loader({ context }: Route.LoaderArgs) {
   return {
     kind: "ready" as const,
     accountTypeGroups: snapshot.accountTypeGroups,
+    changeSummary: snapshot.changeSummary
+      ? {
+          ...snapshot.changeSummary,
+          comparedToCompletedAt:
+            snapshot.changeSummary.comparedToCompletedAt.toISOString(),
+        }
+      : null,
     householdName: snapshot.householdName,
     lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
     totals: snapshot.totals,
@@ -173,6 +253,8 @@ export async function loader({ context }: Route.LoaderArgs) {
 export default function Home({ loaderData }: Route.ComponentProps) {
   const [searchValue, setSearchValue] = useState("");
   const normalizedSearch = searchValue.trim().toLowerCase();
+  const changeSummary =
+    loaderData.kind === "ready" ? loaderData.changeSummary : null;
   const totalAccountCount =
     loaderData.kind === "ready"
       ? loaderData.accountTypeGroups.reduce(
@@ -196,10 +278,14 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             title: "Snapshot",
             items: [
               {
-                badge: "4",
+                badge: "3",
                 href: "#metrics",
                 isActive: true,
                 title: "Key metrics",
+              },
+              {
+                href: "#changes",
+                title: "What changed",
               },
               {
                 href: "#infrastructure",
@@ -289,12 +375,6 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             label: "Investments",
             value: formatCompactUsd(loaderData.totals.investmentsMinor),
           },
-          {
-            detail: "Visible accounts after the sidebar search filter.",
-            icon: <BuildingsIcon className="size-5" />,
-            label: "Visible accounts",
-            value: String(visibleAccountCount),
-          },
         ]
       : [];
 
@@ -356,7 +436,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               <>
                 <section
                   id="metrics"
-                  className="grid scroll-mt-24 gap-4 md:grid-cols-2 2xl:grid-cols-4"
+                  className="grid scroll-mt-24 gap-4 md:grid-cols-2 2xl:grid-cols-3"
                 >
                   {readyMetrics.map((metric) => (
                     <MetricCard
@@ -367,6 +447,142 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                       value={metric.value}
                     />
                   ))}
+                </section>
+
+                <section id="changes" className="scroll-mt-24">
+                  <Card className="border-border/70 bg-card/95 shadow-sm">
+                    <CardHeader className="gap-4">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-primary">
+                            <ArrowsClockwiseIcon className="size-5" />
+                            <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
+                              What changed
+                            </p>
+                          </div>
+                          <CardTitle className="text-2xl tracking-tight">
+                            Compact change summary
+                          </CardTitle>
+                          <CardDescription className="max-w-3xl leading-6">
+                            {changeSummary
+                              ? buildChangeSummaryDetail(changeSummary)
+                              : "Change summary becomes available after the next successful sync creates a comparison point."}
+                          </CardDescription>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className="w-fit border-border/80 bg-background/80"
+                        >
+                          {changeSummary
+                            ? `Compared to ${formatUpdatedAt(changeSummary.comparedToCompletedAt)}`
+                            : "Waiting for another sync"}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      {changeSummary ? (
+                        <>
+                          <div className="grid gap-4 md:grid-cols-3">
+                            <DeltaBadge
+                              deltaMinor={changeSummary.netWorthDeltaMinor}
+                              label="Net worth"
+                            />
+                            <DeltaBadge
+                              deltaMinor={changeSummary.cashDeltaMinor}
+                              label="Cash"
+                            />
+                            <DeltaBadge
+                              deltaMinor={changeSummary.investmentsDeltaMinor}
+                              label="Investments"
+                            />
+                          </div>
+                          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+                            <div className="rounded-2xl border border-border/70 bg-background/75 p-4">
+                              <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
+                                Changed account groups
+                              </p>
+                              <ul className="mt-4 space-y-3">
+                                {changeSummary.changedGroups.map((group) => (
+                                  <li
+                                    key={group.key}
+                                    className="flex items-center justify-between gap-4"
+                                  >
+                                    <div>
+                                      <p className="font-medium">
+                                        {group.label}
+                                      </p>
+                                      <p className="text-sm text-muted-foreground">
+                                        Now {formatUsd(group.latestTotalMinor)}
+                                      </p>
+                                    </div>
+                                    <p
+                                      className={cn(
+                                        "shrink-0 text-sm font-semibold",
+                                        group.deltaMinor > 0 &&
+                                          "text-emerald-700",
+                                        group.deltaMinor < 0 && "text-rose-700",
+                                      )}
+                                    >
+                                      {formatSignedUsd(group.deltaMinor)}
+                                    </p>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                            <div className="rounded-2xl border border-border/70 bg-background/75 p-4">
+                              <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
+                                Largest account moves
+                              </p>
+                              <ul className="mt-4 space-y-3">
+                                {changeSummary.changedAccounts.map(
+                                  (account) => (
+                                    <li
+                                      key={account.id}
+                                      className="flex items-start justify-between gap-4"
+                                    >
+                                      <div className="min-w-0">
+                                        <p className="font-medium">
+                                          {account.name}
+                                        </p>
+                                        <p className="mt-1 text-sm text-muted-foreground">
+                                          {account.institutionName} · now{" "}
+                                          {formatUsd(
+                                            account.latestBalanceMinor,
+                                          )}
+                                        </p>
+                                      </div>
+                                      <p
+                                        className={cn(
+                                          "shrink-0 text-sm font-semibold",
+                                          account.deltaMinor > 0 &&
+                                            "text-emerald-700",
+                                          account.deltaMinor < 0 &&
+                                            "text-rose-700",
+                                        )}
+                                      >
+                                        {formatSignedUsd(account.deltaMinor)}
+                                      </p>
+                                    </li>
+                                  ),
+                                )}
+                              </ul>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-border/80 bg-background/70 p-5">
+                          <p className="font-medium">
+                            Change summary available after the next sync
+                          </p>
+                          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                            The first successful run establishes the current
+                            snapshot. Vista starts explaining movement once a
+                            later sync can be compared against it.
+                          </p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
                 </section>
 
                 <section id="accounts" className="scroll-mt-24 space-y-4">
