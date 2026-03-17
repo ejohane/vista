@@ -12,6 +12,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "bunx wrangler d1 migrations apply vista-dev --local --config apps/web/wrangler.jsonc",
     "db:seed:local": "bunx wrangler d1 execute vista-dev --local --config apps/web/wrangler.jsonc --file packages/db/seeds/dev.sql",
+    "dev": "bun run scripts/dev.ts",
     "dev:sync": "bun run --cwd apps/sync dev",
     "dev:web": "bun run --cwd apps/web dev",
     "format": "biome format --write .",
