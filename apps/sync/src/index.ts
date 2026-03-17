@@ -1,5 +1,7 @@
 import { getDashboardSnapshot, getDb } from "@vista/db";
 
+import { ingestDemoSyncBatch } from "./fixture-sync";
+
 async function readSnapshot(env: Env) {
   const db = getDb(env.DB);
   return getDashboardSnapshot(db);
@@ -21,14 +23,17 @@ export default {
   },
 
   async scheduled(event, env) {
+    const ingestResult = await ingestDemoSyncBatch(env.DB);
     const snapshot = await readSnapshot(env);
 
     console.log(
       JSON.stringify({
+        createdRun: ingestResult.created,
         cron: event.cron,
         household: snapshot?.householdName ?? null,
         lastSyncedAt: snapshot?.lastSyncedAt.toISOString() ?? null,
         netWorthMinor: snapshot?.totals.netWorthMinor ?? null,
+        runId: ingestResult.runId,
       }),
     );
   },
