@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vista-web",
+  "compatibility_date": "2026-03-16",
+  "main": "./workers/app.ts",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vista-dev",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../packages/db/migrations",
+      "preview_database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "vista",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build:web": "bun run --cwd apps/web build",
+    "cf-typegen": "bun run --cwd apps/web cf-typegen && bun run --cwd apps/sync cf-typegen",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "bunx wrangler d1 migrations apply vista-dev --local --config apps/web/wrangler.jsonc",
+    "db:seed:local": "bunx wrangler d1 execute vista-dev --local --config apps/web/wrangler.jsonc --file packages/db/seeds/dev.sql",
+    "dev:sync": "bun run --cwd apps/sync dev",
+    "dev:web": "bun run --cwd apps/web dev",
+    "format": "biome format --write .",
+    "lint": "biome check .",
+    "typecheck": "bun run --cwd packages/db typecheck && bun run --cwd apps/sync typecheck && bun run --cwd apps/web typecheck"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.1.4",
+    "bun-types": "^1.3.10",
+    "drizzle-kit": "^0.31.4"
+  }
+}

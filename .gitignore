@@ -1,0 +1,11 @@
+node_modules
+.DS_Store
+.wrangler
+.react-router
+dist
+coverage
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.tsbuildinfo
+.dev.vars
