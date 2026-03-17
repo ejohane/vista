@@ -19,7 +19,9 @@ describe("formatCompactUsd", () => {
 });
 
 describe("formatUpdatedAt", () => {
-  test("produces a readable timestamp", () => {
-    expect(formatUpdatedAt("2026-03-16T18:30:00.000Z")).toContain("2026");
+  test("produces a deterministic UTC timestamp", () => {
+    expect(formatUpdatedAt("2026-03-16T18:30:00.000Z")).toBe(
+      "Mar 16, 2026 at 6:30 PM UTC",
+    );
   });
 });

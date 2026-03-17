@@ -2,7 +2,7 @@ import { getDashboardSnapshot, getDb } from "@vista/db";
 
 async function readSnapshot(env: Env) {
   const db = getDb(env.DB);
-  return getDashboardSnapshot(db, "household_demo");
+  return getDashboardSnapshot(db);
 }
 
 export default {

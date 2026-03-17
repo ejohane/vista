@@ -3,7 +3,16 @@ import { describe, expect, test } from "bun:test";
 import type { VistaDb } from "./client";
 import { getDashboardSnapshot } from "./queries";
 
-function createMockDb(): VistaDb {
+type MockAccount = {
+  accountType: "brokerage" | "checking" | "retirement" | "savings";
+  balanceMinor: number;
+  id: string;
+  institutionName: string;
+  name: string;
+  reportingGroup: "cash" | "investments";
+};
+
+function createMockDb(accounts: MockAccount[] = defaultAccounts): VistaDb {
   return {
     query: {
       households: {
@@ -17,51 +26,50 @@ function createMockDb(): VistaDb {
     },
     select: () => ({
       from: () => ({
-        where: async () => [
-          {
-            accountType: "checking",
-            balanceMinor: 1284500,
-            id: "acct_checking",
-            institutionName: "US Bank",
-            name: "Everyday Checking",
-            reportingGroup: "cash",
-          },
-          {
-            accountType: "savings",
-            balanceMinor: 3527600,
-            id: "acct_savings",
-            institutionName: "US Bank",
-            name: "Rainy Day Savings",
-            reportingGroup: "cash",
-          },
-          {
-            accountType: "brokerage",
-            balanceMinor: 16450320,
-            id: "acct_brokerage",
-            institutionName: "Vanguard",
-            name: "Taxable Brokerage",
-            reportingGroup: "investments",
-          },
-          {
-            accountType: "retirement",
-            balanceMinor: 24311890,
-            id: "acct_retirement",
-            institutionName: "Vanguard",
-            name: "Rollover IRA",
-            reportingGroup: "investments",
-          },
-        ],
+        where: async () => accounts,
       }),
     }),
   } as unknown as VistaDb;
 }
 
+const defaultAccounts: MockAccount[] = [
+  {
+    accountType: "checking",
+    balanceMinor: 1284500,
+    id: "acct_checking",
+    institutionName: "US Bank",
+    name: "Everyday Checking",
+    reportingGroup: "cash",
+  },
+  {
+    accountType: "savings",
+    balanceMinor: 3527600,
+    id: "acct_savings",
+    institutionName: "US Bank",
+    name: "Rainy Day Savings",
+    reportingGroup: "cash",
+  },
+  {
+    accountType: "brokerage",
+    balanceMinor: 16450320,
+    id: "acct_brokerage",
+    institutionName: "Vanguard",
+    name: "Taxable Brokerage",
+    reportingGroup: "investments",
+  },
+  {
+    accountType: "retirement",
+    balanceMinor: 24311890,
+    id: "acct_retirement",
+    institutionName: "Vanguard",
+    name: "Rollover IRA",
+    reportingGroup: "investments",
+  },
+];
+
 describe("getDashboardSnapshot", () => {
   test("aggregates household totals and groups accounts", async () => {
-    const snapshot = await getDashboardSnapshot(
-      createMockDb(),
-      "household_demo",
-    );
+    const snapshot = await getDashboardSnapshot(createMockDb());
 
     expect(snapshot).not.toBeNull();
     expect(snapshot?.householdName).toBe("Vista Household");
@@ -88,5 +96,20 @@ describe("getDashboardSnapshot", () => {
     } as unknown as VistaDb;
 
     await expect(getDashboardSnapshot(db, "missing")).resolves.toBeNull();
+  });
+
+  test("throws when an account uses a reporting group that does not match its type", async () => {
+    const invalidAccounts: MockAccount[] = [
+      {
+        ...defaultAccounts[0],
+        reportingGroup: "investments",
+      },
+    ];
+
+    await expect(
+      getDashboardSnapshot(createMockDb(invalidAccounts)),
+    ).rejects.toThrow(
+      'Account acct_checking for household household_demo uses reporting group "investments" but "checking" accounts must be "cash".',
+    );
   });
 });

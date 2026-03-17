@@ -10,6 +10,13 @@ const accountTypeLabels = {
   savings: "Savings",
 } as const;
 
+const accountTypeReportingGroups = {
+  brokerage: "investments",
+  checking: "cash",
+  retirement: "investments",
+  savings: "cash",
+} as const;
+
 const reportingGroupOrder = ["cash", "investments"] as const;
 type ReportingGroup = (typeof reportingGroupOrder)[number];
 type HouseholdAccount = {
@@ -43,17 +50,41 @@ export type DashboardSnapshot = {
   };
 };
 
+function assertValidAccount(
+  account: HouseholdAccount,
+  householdId: string,
+): asserts account is HouseholdAccount {
+  const expectedReportingGroup =
+    accountTypeReportingGroups[account.accountType];
+
+  if (expectedReportingGroup === undefined) {
+    throw new Error(
+      `Account ${account.id} for household ${householdId} has unsupported account type "${String(account.accountType)}".`,
+    );
+  }
+
+  if (account.reportingGroup !== expectedReportingGroup) {
+    throw new Error(
+      `Account ${account.id} for household ${householdId} uses reporting group "${account.reportingGroup}" but "${account.accountType}" accounts must be "${expectedReportingGroup}".`,
+    );
+  }
+}
+
 export async function getDashboardSnapshot(
   db: VistaDb,
-  householdId: string,
+  householdId?: string,
 ): Promise<DashboardSnapshot | null> {
-  const household = await db.query.households.findFirst({
-    where: eq(households.id, householdId),
-  });
+  const household = householdId
+    ? await db.query.households.findFirst({
+        where: eq(households.id, householdId),
+      })
+    : await db.query.households.findFirst();
 
   if (!household) {
     return null;
   }
+
+  const resolvedHouseholdId = household.id;
 
   const householdAccounts = await db
     .select({
@@ -65,7 +96,11 @@ export async function getDashboardSnapshot(
       reportingGroup: accounts.reportingGroup,
     })
     .from(accounts)
-    .where(eq(accounts.householdId, householdId));
+    .where(eq(accounts.householdId, resolvedHouseholdId));
+
+  householdAccounts.forEach((account) => {
+    assertValidAccount(account, resolvedHouseholdId);
+  });
 
   const totals = householdAccounts.reduce(
     (result, account) => {

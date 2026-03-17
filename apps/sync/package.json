@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "wrangler deploy --dry-run --outdir .wrangler/deploy",
     "deploy": "wrangler deploy",
     "dev": "wrangler dev --test-scheduled --port 8788 --persist-to ../web/.wrangler/state",
     "start": "wrangler dev --test-scheduled",

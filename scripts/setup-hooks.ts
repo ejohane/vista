@@ -26,52 +26,96 @@ async function getCommandOutput(command: string[]) {
   return stdout.trim();
 }
 
+async function runCommand(command: string[]) {
+  const child = Bun.spawn(command, {
+    cwd: rootDir,
+    stderr: "inherit",
+    stdout: "inherit",
+  });
+
+  const exitCode = await child.exited;
+
+  if (exitCode !== 0) {
+    throw new Error(`command failed with exit code ${exitCode}`);
+  }
+}
+
 async function main() {
+  const topLevel = await getCommandOutput([
+    "git",
+    "rev-parse",
+    "--show-toplevel",
+  ]).catch(() => "");
+
+  if (!topLevel) {
+    console.log("[prepare] Skipping Git hook setup outside a Git repository.");
+    return;
+  }
+
+  if (path.resolve(topLevel) !== rootDir) {
+    console.log("[prepare] Skipping Git hook setup outside the repo root.");
+    return;
+  }
+
   try {
-    const topLevel = await getCommandOutput([
+    const expectedHooksPath = path.join(rootDir, ".githooks");
+    const gitDir = await getCommandOutput(["git", "rev-parse", "--git-dir"]);
+    const gitCommonDir = await getCommandOutput([
       "git",
       "rev-parse",
-      "--show-toplevel",
+      "--git-common-dir",
     ]);
-
-    if (path.resolve(topLevel) !== rootDir) {
-      console.log("[prepare] Skipping Git hook setup outside the repo root.");
-      return;
-    }
-
+    const useWorktreeConfig =
+      path.resolve(rootDir, gitDir) !== path.resolve(rootDir, gitCommonDir) &&
+      (await getCommandOutput([
+        "git",
+        "config",
+        "--get",
+        "extensions.worktreeConfig",
+      ]).catch(() => "")) === "true";
+    const configCommand = useWorktreeConfig
+      ? ["git", "config", "--worktree"]
+      : ["git", "config"];
     const hooksPath = await getCommandOutput([
-      "git",
-      "config",
+      ...configCommand,
       "core.hooksPath",
     ]).catch(() => "");
 
-    if (hooksPath === ".githooks") {
+    if (hooksPath === expectedHooksPath || hooksPath === ".githooks") {
       console.log("[prepare] Git hooks already configured.");
       return;
     }
 
-    const configChild = Bun.spawn(
-      ["git", "config", "core.hooksPath", ".githooks"],
-      {
-        cwd: rootDir,
-        stderr: "inherit",
-        stdout: "inherit",
-      },
-    );
+    await runCommand([...configCommand, "core.hooksPath", expectedHooksPath]);
 
-    const exitCode = await configChild.exited;
+    const sharedHooksPath = await getCommandOutput([
+      "git",
+      "config",
+      "--local",
+      "core.hooksPath",
+    ]).catch(() => "");
 
-    if (exitCode !== 0) {
-      throw new Error(`git config exited with code ${exitCode}`);
+    if (
+      useWorktreeConfig &&
+      (sharedHooksPath === ".githooks" || sharedHooksPath === expectedHooksPath)
+    ) {
+      await runCommand([
+        "git",
+        "config",
+        "--local",
+        "--unset-all",
+        "core.hooksPath",
+      ]);
     }
 
-    console.log("[prepare] Configured Git hooks to use .githooks.");
-  } catch (error) {
     console.log(
-      `[prepare] Skipping Git hook setup: ${
-        error instanceof Error ? error.message : String(error)
+      `[prepare] Configured Git hooks to use ${expectedHooksPath}.${
+        useWorktreeConfig ? " (worktree-local)" : ""
       }`,
     );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Git hook setup failed: ${message}`);
   }
 }
 

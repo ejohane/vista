@@ -5,6 +5,26 @@ const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+const wranglerBin = path.join(
+  rootDir,
+  "node_modules",
+  ".bin",
+  process.platform === "win32" ? "wrangler.cmd" : "wrangler",
+);
+const webAppDir = path.join(rootDir, "apps", "web");
+const syncAppDir = path.join(rootDir, "apps", "sync");
+const reactRouterBin = path.join(
+  webAppDir,
+  "node_modules",
+  ".bin",
+  process.platform === "win32" ? "react-router.cmd" : "react-router",
+);
+const syncWranglerBin = path.join(
+  syncAppDir,
+  "node_modules",
+  ".bin",
+  process.platform === "win32" ? "wrangler.cmd" : "wrangler",
+);
 
 type RunningProcess = {
   label: string;
@@ -31,11 +51,10 @@ async function runCommand(command: string[], label: string) {
   }
 }
 
-async function queryHouseholdCount() {
+async function querySeedStatus() {
   const child = Bun.spawn(
     [
-      "bunx",
-      "wrangler",
+      wranglerBin,
       "d1",
       "execute",
       "vista-dev",
@@ -44,7 +63,7 @@ async function queryHouseholdCount() {
       "apps/web/wrangler.jsonc",
       "--json",
       "--command",
-      "SELECT COUNT(*) AS count FROM households;",
+      "SELECT (SELECT COUNT(*) FROM households) AS householdCount, (SELECT COUNT(*) FROM accounts) AS accountCount;",
     ],
     {
       cwd: rootDir,
@@ -61,11 +80,17 @@ async function queryHouseholdCount() {
   }
 
   const parsed = JSON.parse(stdout) as Array<{
-    results?: Array<{ count?: number | string }>;
+    results?: Array<{
+      accountCount?: number | string;
+      householdCount?: number | string;
+    }>;
   }>;
-  const count = parsed[0]?.results?.[0]?.count;
+  const result = parsed[0]?.results?.[0];
 
-  return Number(count ?? 0);
+  return {
+    accountCount: Number(result?.accountCount ?? 0),
+    householdCount: Number(result?.householdCount ?? 0),
+  };
 }
 
 async function ensureLocalDbReady() {
@@ -75,19 +100,25 @@ async function ensureLocalDbReady() {
     "Applying local D1 migrations",
   );
 
-  const householdCount = await queryHouseholdCount();
+  const { accountCount, householdCount } = await querySeedStatus();
 
-  if (householdCount > 0) {
-    logStep(`Local D1 already seeded (${householdCount} household row found).`);
+  if (householdCount > 0 && accountCount > 0) {
+    logStep(
+      `Local D1 already has data (${householdCount} household row, ${accountCount} account row found).`,
+    );
     return;
   }
 
   await runCommand(["bun", "run", "db:seed:local"], "Seeding local D1");
 }
 
-function spawnService(label: string, command: string[]): RunningProcess {
+function spawnService(
+  label: string,
+  command: string[],
+  cwd = rootDir,
+): RunningProcess {
   const child = Bun.spawn(command, {
-    cwd: rootDir,
+    cwd,
     stderr: "inherit",
     stdin: "inherit",
     stdout: "inherit",
@@ -104,8 +135,32 @@ async function main() {
   console.log("[dev] Sync: http://127.0.0.1:8788");
 
   const services = [
-    spawnService("web", ["bun", "run", "dev:web"]),
-    spawnService("sync", ["bun", "run", "dev:sync"]),
+    spawnService(
+      "web",
+      [
+        reactRouterBin,
+        "dev",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5173",
+        "--strictPort",
+      ],
+      webAppDir,
+    ),
+    spawnService(
+      "sync",
+      [
+        syncWranglerBin,
+        "dev",
+        "--test-scheduled",
+        "--port",
+        "8788",
+        "--persist-to",
+        "../web/.wrangler/state",
+      ],
+      syncAppDir,
+    ),
   ];
 
   let shuttingDown = false;

@@ -4,6 +4,7 @@ node_modules
 .react-router
 dist
 coverage
+.codex-review
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

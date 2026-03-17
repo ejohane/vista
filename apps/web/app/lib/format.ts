@@ -3,10 +3,20 @@ const compactDollarFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 1,
   notation: "compact",
 });
-const timestampFormatter = new Intl.DateTimeFormat("en-US", {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
+const monthLabels = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
 
 export function formatCompactUsd(minorUnits: number) {
   const sign = minorUnits < 0 ? "-" : "";
@@ -28,5 +38,14 @@ export function formatUsd(minorUnits: number) {
 }
 
 export function formatUpdatedAt(isoTimestamp: string) {
-  return timestampFormatter.format(new Date(isoTimestamp));
+  const timestamp = new Date(isoTimestamp);
+  const month = monthLabels[timestamp.getUTCMonth()];
+  const day = timestamp.getUTCDate();
+  const year = timestamp.getUTCFullYear();
+  const hours24 = timestamp.getUTCHours();
+  const minutes = String(timestamp.getUTCMinutes()).padStart(2, "0");
+  const hours12 = hours24 % 12 || 12;
+  const meridiem = hours24 >= 12 ? "PM" : "AM";
+
+  return `${month} ${day}, ${year} at ${hours12}:${minutes} ${meridiem} UTC`;
 }
