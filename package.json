@@ -17,6 +17,9 @@
     "dev:web": "bun run --cwd apps/web dev",
     "format": "biome format --write .",
     "lint": "biome check .",
+    "prepare": "bun run scripts/setup-hooks.ts",
+    "precommit": "bun run lint && bun run typecheck && bun run test",
+    "test": "bun test",
     "typecheck": "bun run --cwd packages/db typecheck && bun run --cwd apps/sync typecheck && bun run --cwd apps/web typecheck"
   },
   "devDependencies": {
