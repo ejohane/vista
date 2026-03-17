@@ -1,0 +1,29 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.7/schema.json",
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space"
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true
+    }
+  },
+  "files": {
+    "includes": [
+      "**",
+      "!**/.react-router",
+      "!**/.wrangler",
+      "!**/.vscode",
+      "!**/build",
+      "!**/worker-configuration.d.ts"
+    ],
+    "ignoreUnknown": true
+  }
+}
