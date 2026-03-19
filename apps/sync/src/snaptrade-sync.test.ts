@@ -1,23 +1,35 @@
 import { describe, expect, mock, test } from "bun:test";
 
-import { syncSnaptradeConnection } from "./snaptrade-sync";
+import {
+  syncConfiguredSnaptradeConnections,
+  syncSnaptradeConnection,
+} from "./snaptrade-sync";
 import { createEmptySyncDatabase } from "./test-helpers";
 
 const now = new Date("2026-03-18T18:30:00.000Z");
 
 function seedSnaptradeConnection(
   sqlite: ReturnType<typeof createEmptySyncDatabase>["sqlite"],
+  values?: {
+    connectionId?: string;
+    externalConnectionId?: string;
+    householdId?: string;
+  },
 ) {
+  const connectionId = values?.connectionId ?? "conn_snaptrade_vanguard";
+  const externalConnectionId =
+    values?.externalConnectionId ?? "brokerage-auth-1";
+  const householdId = values?.householdId ?? "household_demo";
   const createdAt = new Date("2026-03-15T12:00:00.000Z").getTime();
 
   sqlite
     .query(
       `
-        insert into households (id, name, last_synced_at, created_at)
+        insert or ignore into households (id, name, last_synced_at, created_at)
         values (?, ?, ?, ?)
       `,
     )
-    .run("household_demo", "Vista Household", createdAt, createdAt);
+    .run(householdId, "Vista Household", createdAt, createdAt);
   sqlite
     .query(
       `
@@ -35,11 +47,11 @@ function seedSnaptradeConnection(
       `,
     )
     .run(
-      "conn_snaptrade_vanguard",
-      "household_demo",
+      connectionId,
+      householdId,
       "snaptrade",
       "active",
-      "brokerage-auth-1",
+      externalConnectionId,
       "snaptrade-user-secret",
       createdAt,
       createdAt,
@@ -314,5 +326,113 @@ describe("syncSnaptradeConnection", () => {
     expect(syncRun.providerConnectionId).toBe("conn_snaptrade_vanguard");
     expect(syncRun.recordsChanged).toBeGreaterThan(0);
     expect(syncRun.status).toBe("succeeded");
+  });
+
+  test("continues syncing other SnapTrade connections when one connection fails", async () => {
+    const { d1, sqlite } = createEmptySyncDatabase();
+    seedSnaptradeConnection(sqlite, {
+      connectionId: "conn_snaptrade_broken",
+      externalConnectionId: "brokerage-auth-broken",
+    });
+    seedSnaptradeConnection(sqlite, {
+      connectionId: "conn_snaptrade_good",
+      externalConnectionId: "brokerage-auth-good",
+      householdId: "household_demo",
+    });
+
+    const listUserAccounts = mock(async (args: Record<string, string>) => {
+      if (args.brokerageAuthorizationId === "brokerage-auth-broken") {
+        throw new Error("brokerage unavailable");
+      }
+
+      return [
+        {
+          balance: {
+            total: {
+              amount: 3720.12,
+              currency: "USD",
+            },
+          },
+          brokerage_authorization: "brokerage-auth-good",
+          id: "snaptrade-account-brokerage",
+          institution_name: "Vanguard",
+          is_paper: false,
+          name: "Vanguard Taxable Brokerage",
+          raw_type: "Individual",
+        },
+      ];
+    });
+    const getAllUserHoldings = mock(async (args: Record<string, string>) => {
+      if (args.brokerageAuthorizationId === "brokerage-auth-broken") {
+        throw new Error("brokerage unavailable");
+      }
+
+      return [
+        {
+          account: {
+            id: "snaptrade-account-brokerage",
+            institution_name: "Vanguard",
+            name: "Vanguard Taxable Brokerage",
+          },
+          balances: [
+            {
+              cash: 320.12,
+              currency: {
+                code: "USD",
+              },
+            },
+          ],
+          positions: [],
+        },
+      ];
+    });
+
+    const results = await syncConfiguredSnaptradeConnections({
+      client: {
+        getAllUserHoldings,
+        listUserAccounts,
+      },
+      database: d1,
+      now,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      runId: "sync:snaptrade:conn_snaptrade_good:20260318T183000000Z",
+      status: "succeeded",
+    });
+    expect(
+      sqlite
+        .query(
+          `
+            select
+              provider_connection_id as providerConnectionId,
+              status
+            from sync_runs
+            order by provider_connection_id asc
+          `,
+        )
+        .all(),
+    ).toEqual([
+      {
+        providerConnectionId: "conn_snaptrade_broken",
+        status: "failed",
+      },
+      {
+        providerConnectionId: "conn_snaptrade_good",
+        status: "succeeded",
+      },
+    ]);
+    expect(
+      sqlite
+        .query(
+          `
+            select count(*) as count
+            from provider_accounts
+            where provider_connection_id = ?
+          `,
+        )
+        .get("conn_snaptrade_good"),
+    ).toEqual({ count: 1 });
   });
 });

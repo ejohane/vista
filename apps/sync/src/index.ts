@@ -33,6 +33,25 @@ async function hasSuccessfulSync(env: Env) {
   return successfulRun !== null;
 }
 
+async function hasConfiguredProviderConnection(env: Env) {
+  const configuredConnection = await env.DB.prepare(
+    `
+      select id
+      from provider_connections
+      where status = ?
+        and (
+          (provider = ? and access_url is not null)
+          or (provider = ? and access_secret is not null)
+        )
+      limit 1
+    `,
+  )
+    .bind("active", "simplefin", "snaptrade")
+    .first<{ id: string }>();
+
+  return configuredConnection !== null;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -52,6 +71,7 @@ export default {
   },
 
   async scheduled(event, env) {
+    const hasConfiguredConnections = await hasConfiguredProviderConnection(env);
     const simplefinResults = await syncConfiguredSimplefinConnections({
       database: env.DB,
     });
@@ -62,7 +82,9 @@ export default {
     });
     const syncResults = [...simplefinResults, ...snaptradeResults];
     const ingestResult =
-      syncResults.length === 0 ? await ingestDemoSyncBatch(env.DB) : null;
+      !hasConfiguredConnections && syncResults.length === 0
+        ? await ingestDemoSyncBatch(env.DB)
+        : null;
     const snapshot = await readSnapshot(env);
     const logPayload = ingestResult
       ? {

@@ -1,5 +1,3 @@
-import { Snaptrade } from "snaptrade-typescript-sdk";
-
 export type SnaptradeDataClient = {
   getAllUserHoldings: (args: {
     brokerageAuthorizationId: string;
@@ -315,17 +313,73 @@ function createPositionHolding(args: {
   };
 }
 
+type SnaptradeSdkClient = {
+  accountInformation: {
+    getAllUserHoldings: (args: {
+      brokerageAuthorizations: string;
+      userId: string;
+      userSecret: string;
+    }) => Promise<{ data?: unknown }>;
+    listUserAccounts: (args: {
+      userId: string;
+      userSecret: string;
+    }) => Promise<{ data?: unknown }>;
+  };
+  authentication: {
+    loginSnapTradeUser: (args: {
+      broker?: string;
+      connectionPortalVersion?: "v2" | "v3" | "v4";
+      connectionType?: "read" | "trade" | "trade-if-available";
+      customRedirect?: string;
+      immediateRedirect?: boolean;
+      reconnect?: string;
+      showCloseButton?: boolean;
+      userId: string;
+      userSecret: string;
+    }) => Promise<{ data?: unknown }>;
+    registerSnapTradeUser: (args: {
+      userId: string;
+    }) => Promise<{ data?: unknown }>;
+  };
+  connections: {
+    listBrokerageAuthorizations: (args: {
+      userId: string;
+      userSecret: string;
+    }) => Promise<{ data?: unknown }>;
+  };
+};
+
+function createSnaptradeSdkLoader(config: {
+  clientId: string;
+  consumerKey: string;
+}) {
+  let clientPromise: Promise<SnaptradeSdkClient> | null = null;
+
+  return async function loadClient() {
+    if (!clientPromise) {
+      clientPromise = import("snaptrade-typescript-sdk").then((module) => {
+        const client = new module.Snaptrade({
+          clientId: config.clientId,
+          consumerKey: config.consumerKey,
+        });
+
+        return client as SnaptradeSdkClient;
+      });
+    }
+
+    return clientPromise;
+  };
+}
+
 export function createSnaptradeDataClient(config: {
   clientId: string;
   consumerKey: string;
 }): SnaptradeDataClient {
-  const snaptrade = new Snaptrade({
-    clientId: config.clientId,
-    consumerKey: config.consumerKey,
-  });
+  const loadSnaptrade = createSnaptradeSdkLoader(config);
 
   return {
     async getAllUserHoldings(args) {
+      const snaptrade = await loadSnaptrade();
       const response = await snaptrade.accountInformation.getAllUserHoldings({
         brokerageAuthorizations: args.brokerageAuthorizationId,
         userId: args.userId,
@@ -336,6 +390,7 @@ export function createSnaptradeDataClient(config: {
     },
 
     async listUserAccounts(args) {
+      const snaptrade = await loadSnaptrade();
       const response = await snaptrade.accountInformation.listUserAccounts({
         userId: args.userId,
         userSecret: args.userSecret,
@@ -354,13 +409,11 @@ export function createSnaptradePortalClient(config: {
   clientId: string;
   consumerKey: string;
 }): SnaptradePortalClient {
-  const snaptrade = new Snaptrade({
-    clientId: config.clientId,
-    consumerKey: config.consumerKey,
-  });
+  const loadSnaptrade = createSnaptradeSdkLoader(config);
 
   return {
     async listBrokerageAuthorizations(args) {
+      const snaptrade = await loadSnaptrade();
       const response = await snaptrade.connections.listBrokerageAuthorizations({
         userId: args.userId,
         userSecret: args.userSecret,
@@ -370,6 +423,7 @@ export function createSnaptradePortalClient(config: {
     },
 
     async loginSnapTradeUser(args) {
+      const snaptrade = await loadSnaptrade();
       const response = await snaptrade.authentication.loginSnapTradeUser({
         broker: args.broker,
         connectionPortalVersion: args.connectionPortalVersion,
@@ -406,13 +460,20 @@ export function createSnaptradePortalClient(config: {
     },
 
     async registerSnapTradeUser(args) {
+      const snaptrade = await loadSnaptrade();
       const response = await snaptrade.authentication.registerSnapTradeUser({
         userId: args.userId,
       });
+      const registrationData = response.data as
+        | {
+            userId?: string;
+            userSecret?: string;
+          }
+        | undefined;
 
       if (
-        typeof response.data?.userId !== "string" ||
-        typeof response.data?.userSecret !== "string"
+        typeof registrationData?.userId !== "string" ||
+        typeof registrationData?.userSecret !== "string"
       ) {
         throw new Error(
           "SnapTrade registration succeeded but did not return user credentials.",
@@ -420,8 +481,8 @@ export function createSnaptradePortalClient(config: {
       }
 
       return {
-        userId: response.data.userId,
-        userSecret: response.data.userSecret,
+        userId: registrationData.userId,
+        userSecret: registrationData.userSecret,
       };
     },
   };
@@ -955,14 +1016,16 @@ export async function syncConfiguredSnaptradeConnections(args: {
   const results = [];
 
   for (const connection of connections.results) {
-    results.push(
-      await syncSnaptradeConnection({
-        client: resolvedClient,
-        connectionId: connection.id,
-        database: args.database,
-        now: args.now,
-      }),
-    );
+    try {
+      results.push(
+        await syncSnaptradeConnection({
+          client: resolvedClient,
+          connectionId: connection.id,
+          database: args.database,
+          now: args.now,
+        }),
+      );
+    } catch {}
   }
 
   return results;

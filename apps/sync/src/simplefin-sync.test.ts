@@ -1,6 +1,9 @@
 import { describe, expect, mock, test } from "bun:test";
 
-import { syncSimplefinConnection } from "./simplefin-sync";
+import {
+  syncConfiguredSimplefinConnections,
+  syncSimplefinConnection,
+} from "./simplefin-sync";
 import { createEmptySyncDatabase } from "./test-helpers";
 
 const now = new Date("2026-03-18T18:30:00.000Z");
@@ -9,16 +12,18 @@ function seedSimplefinConnection(
   sqlite: ReturnType<typeof createEmptySyncDatabase>["sqlite"],
   values?: {
     accessUrl?: string;
+    connectionId?: string;
     householdId?: string;
   },
 ) {
+  const connectionId = values?.connectionId ?? "conn_simplefin_us_bank";
   const householdId = values?.householdId ?? "household_demo";
   const createdAt = new Date("2026-03-15T12:00:00.000Z").getTime();
 
   sqlite
     .query(
       `
-        insert into households (id, name, last_synced_at, created_at)
+        insert or ignore into households (id, name, last_synced_at, created_at)
         values (?, ?, ?, ?)
       `,
     )
@@ -40,11 +45,11 @@ function seedSimplefinConnection(
       `,
     )
     .run(
-      "conn_simplefin_us_bank",
+      connectionId,
       householdId,
       "simplefin",
       "active",
-      "simplefin-us-bank",
+      connectionId.replace("conn_", ""),
       values?.accessUrl ??
         "https://demo-user:demo-pass@bridge.example/simplefin",
       createdAt,
@@ -332,5 +337,99 @@ describe("syncSimplefinConnection", () => {
       cursor: "1742100000",
       updatedAt: new Date("2026-03-17T18:30:00.000Z").getTime(),
     });
+  });
+
+  test("continues syncing other SimpleFIN connections when one connection fails", async () => {
+    const { d1, sqlite } = createEmptySyncDatabase();
+    seedSimplefinConnection(sqlite, {
+      accessUrl: "https://bad-user:bad-pass@bridge.example/simplefin",
+      connectionId: "conn_simplefin_bad",
+    });
+    seedSimplefinConnection(sqlite, {
+      accessUrl: "https://good-user:good-pass@bridge.example/simplefin",
+      connectionId: "conn_simplefin_good",
+      householdId: "household_demo",
+    });
+    const nowEpochSeconds = Math.floor(now.getTime() / 1000);
+
+    const fetchMock = mock(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const authorization = new Headers(init?.headers).get("authorization");
+
+        if (authorization === "Basic YmFkLXVzZXI6YmFkLXBhc3M=") {
+          return new Response("forbidden", { status: 403 });
+        }
+
+        return new Response(
+          JSON.stringify({
+            accounts: [
+              {
+                balance: "1023.45",
+                "balance-date": nowEpochSeconds,
+                currency: "USD",
+                id: "checking-123",
+                name: "Everyday Checking",
+                org: {
+                  domain: "usbank.com",
+                  name: "US Bank",
+                  "sfin-url": "https://bridge.simplefin.org/simplefin",
+                },
+                transactions: [],
+              },
+            ],
+            errors: [],
+          }),
+          {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          },
+        );
+      },
+    );
+
+    const results = await syncConfiguredSimplefinConnections({
+      database: d1,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      now,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      runId: "sync:simplefin:conn_simplefin_good:20260318T183000000Z",
+      status: "succeeded",
+    });
+    expect(
+      sqlite
+        .query(
+          `
+            select
+              provider_connection_id as providerConnectionId,
+              status
+            from sync_runs
+            order by provider_connection_id asc
+          `,
+        )
+        .all(),
+    ).toEqual([
+      {
+        providerConnectionId: "conn_simplefin_bad",
+        status: "failed",
+      },
+      {
+        providerConnectionId: "conn_simplefin_good",
+        status: "succeeded",
+      },
+    ]);
+    expect(
+      sqlite
+        .query(
+          `
+            select count(*) as count
+            from provider_accounts
+            where provider_connection_id = ?
+          `,
+        )
+        .get("conn_simplefin_good"),
+    ).toEqual({ count: 1 });
   });
 });

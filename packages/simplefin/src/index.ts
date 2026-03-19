@@ -655,14 +655,16 @@ export async function syncConfiguredSimplefinConnections(args: {
   const results = [];
 
   for (const connection of connections.results) {
-    results.push(
-      await syncSimplefinConnection({
-        connectionId: connection.id,
-        database: args.database,
-        fetchImpl: args.fetchImpl,
-        now: args.now,
-      }),
-    );
+    try {
+      results.push(
+        await syncSimplefinConnection({
+          connectionId: connection.id,
+          database: args.database,
+          fetchImpl: args.fetchImpl,
+          now: args.now,
+        }),
+      );
+    } catch {}
   }
 
   return results;
