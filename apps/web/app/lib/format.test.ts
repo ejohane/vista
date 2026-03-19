@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { formatCompactUsd, formatUpdatedAt, formatUsd } from "@/lib/format";
+import {
+  formatCompactUsd,
+  formatSignedUsd,
+  formatUpdatedAt,
+  formatUsd,
+} from "@/lib/format";
 
 describe("formatUsd", () => {
   test("formats positive minor-unit amounts", () => {
@@ -15,6 +20,13 @@ describe("formatUsd", () => {
 describe("formatCompactUsd", () => {
   test("formats dashboard-scale totals compactly", () => {
     expect(formatCompactUsd(24311890)).toBe("$243.1K");
+  });
+});
+
+describe("formatSignedUsd", () => {
+  test("formats positive and negative deltas with explicit signs", () => {
+    expect(formatSignedUsd(374310)).toBe("+$3,743.10");
+    expect(formatSignedUsd(-501)).toBe("-$5.01");
   });
 });
 

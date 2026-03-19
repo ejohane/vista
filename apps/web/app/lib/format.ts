@@ -37,6 +37,16 @@ export function formatUsd(minorUnits: number) {
   ).padStart(2, "0")}`;
 }
 
+export function formatSignedUsd(minorUnits: number) {
+  if (minorUnits === 0) {
+    return "$0.00";
+  }
+
+  const sign = minorUnits > 0 ? "+" : "-";
+
+  return `${sign}${formatUsd(Math.abs(minorUnits))}`;
+}
+
 export function formatUpdatedAt(isoTimestamp: string) {
   const timestamp = new Date(isoTimestamp);
   const month = monthLabels[timestamp.getUTCMonth()];
