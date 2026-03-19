@@ -84,6 +84,8 @@ describe("Home route", () => {
     expect(html).toContain("+$3,743.10");
     expect(html).toContain("+$721.00");
     expect(html).toContain("Largest account moves");
+    expect(html).toContain("/accounts/review");
+    expect(html).toContain("/portfolio");
   });
 
   test("renders the explicit empty state when only one successful run exists", () => {
@@ -141,6 +143,8 @@ describe("Home route", () => {
     expect(html).toContain(
       "Loaded current balances while waiting for the first successful sync.",
     );
+    expect(html).toContain("/connect/simplefin");
+    expect(html).toContain("/connect/snaptrade");
   });
 
   test("renders explicit flat-state copy when comparison deltas are zero", () => {

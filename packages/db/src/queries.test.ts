@@ -438,6 +438,134 @@ describe("getDashboardSnapshot", () => {
     expect(snapshot?.totals.netWorthMinor).toBe(45574310);
   });
 
+  test("honors account curation for display names, reporting exclusion, and hidden presentation", async () => {
+    const { db, sqlite } = createTestDb();
+
+    sqlite
+      .query(
+        `
+          update accounts
+          set
+            display_name = ?,
+            include_in_household_reporting = ?,
+            is_hidden = ?
+          where id = ?
+        `,
+      )
+      .run("Household Checking", 1, 0, "acct_checking");
+    sqlite
+      .query(
+        `
+          update accounts
+          set include_in_household_reporting = ?
+          where id = ?
+        `,
+      )
+      .run(0, "acct_savings");
+    sqlite
+      .query(
+        `
+          update accounts
+          set is_hidden = ?
+          where id = ?
+        `,
+      )
+      .run(1, "acct_retirement");
+
+    insertSucceededRun(sqlite, {
+      balances: {
+        acct_brokerage: 16180000,
+        acct_checking: 1240000,
+        acct_retirement: 24280000,
+        acct_savings: 3500000,
+      },
+      completedAt: firstCompletedAt,
+      runId: "sync_seed_2026_03_15",
+      startedAt: new Date("2026-03-15T18:25:00.000Z"),
+    });
+    insertSucceededRun(sqlite, {
+      balances: {
+        acct_brokerage: 16450320,
+        acct_checking: 1284500,
+        acct_retirement: 24311890,
+        acct_savings: 3527600,
+      },
+      completedAt: secondCompletedAt,
+      runId: "sync_seed_2026_03_16",
+      startedAt: new Date("2026-03-16T18:25:00.000Z"),
+    });
+
+    const snapshot = await getDashboardSnapshot(db);
+
+    expect(snapshot?.totals).toEqual({
+      cashMinor: 1284500,
+      investmentsMinor: 40762210,
+      netWorthMinor: 42046710,
+    });
+    expect(snapshot?.accountTypeGroups.map((group) => group.key)).toEqual([
+      "checking",
+      "brokerage",
+    ]);
+    expect(snapshot?.accountTypeGroups[0]?.accounts).toEqual([
+      {
+        accountType: "checking",
+        balanceMinor: 1284500,
+        id: "acct_checking",
+        institutionName: "US Bank",
+        name: "Household Checking",
+      },
+    ]);
+    expect(snapshot?.changeSummary).toEqual({
+      cashDeltaMinor: 44500,
+      changedAccounts: [
+        {
+          accountType: "brokerage",
+          deltaMinor: 270320,
+          id: "acct_brokerage",
+          institutionName: "Vanguard",
+          latestBalanceMinor: 16450320,
+          name: "Taxable Brokerage",
+          previousBalanceMinor: 16180000,
+        },
+        {
+          accountType: "checking",
+          deltaMinor: 44500,
+          id: "acct_checking",
+          institutionName: "US Bank",
+          latestBalanceMinor: 1284500,
+          name: "Household Checking",
+          previousBalanceMinor: 1240000,
+        },
+      ],
+      changedGroups: [
+        {
+          deltaMinor: 270320,
+          key: "brokerage",
+          label: "Brokerage",
+          latestTotalMinor: 16450320,
+          previousTotalMinor: 16180000,
+        },
+        {
+          deltaMinor: 44500,
+          key: "checking",
+          label: "Checking",
+          latestTotalMinor: 1284500,
+          previousTotalMinor: 1240000,
+        },
+        {
+          deltaMinor: 31890,
+          key: "retirement",
+          label: "Retirement",
+          latestTotalMinor: 24311890,
+          previousTotalMinor: 24280000,
+        },
+      ],
+      comparedToCompletedAt: firstCompletedAt,
+      investmentsDeltaMinor: 302210,
+      netWorthDeltaMinor: 346710,
+    });
+  });
+
   test("returns null when the household cannot be found", async () => {
     const { db } = createTestDb();
 

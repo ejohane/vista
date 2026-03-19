@@ -28,7 +28,9 @@ type HouseholdAccountSnapshot = {
   accountId: string;
   accountType: keyof typeof accountTypeLabels;
   balanceMinor: number;
+  includeInHouseholdReporting: boolean;
   institutionName: string;
+  isHidden: boolean;
   name: string;
   reportingGroup: ReportingGroup;
   sourceSyncRunId: string;
@@ -122,6 +124,20 @@ function buildTotals(accountsForTotals: HouseholdAccountSnapshot[]) {
   );
 }
 
+function filterReportingAccounts(
+  accountsForReporting: HouseholdAccountSnapshot[],
+) {
+  return accountsForReporting.filter(
+    (account) => account.includeInHouseholdReporting,
+  );
+}
+
+function filterVisibleAccounts(
+  accountsForPresentation: HouseholdAccountSnapshot[],
+) {
+  return accountsForPresentation.filter((account) => !account.isHidden);
+}
+
 function buildAccountTypeGroups(accountsForGroups: HouseholdAccountSnapshot[]) {
   return Object.entries(
     accountsForGroups.reduce<
@@ -205,7 +221,10 @@ async function loadHouseholdAccounts(
       accountId: accounts.id,
       accountType: accounts.accountType,
       balanceMinor: accounts.balanceMinor,
+      displayName: accounts.displayName,
+      includeInHouseholdReporting: accounts.includeInHouseholdReporting,
       institutionName: accounts.institutionName,
+      isHidden: accounts.isHidden,
       name: accounts.name,
       reportingGroup: accounts.reportingGroup,
       sourceSyncRunId: accounts.id,
@@ -213,11 +232,16 @@ async function loadHouseholdAccounts(
     .from(accounts)
     .where(eq(accounts.householdId, householdId));
 
-  accountRows.forEach((account) => {
+  const normalizedRows = accountRows.map((account) => ({
+    ...account,
+    name: account.displayName ?? account.name,
+  }));
+
+  normalizedRows.forEach((account) => {
     assertValidAccount(account, householdId);
   });
 
-  return accountRows;
+  return normalizedRows;
 }
 
 function buildChangeSummary(
@@ -244,10 +268,16 @@ function buildChangeSummary(
   }, createAccountTypeTotals());
 
   const latestByAccountId = new Map(
-    latestAccounts.map((account) => [account.accountId, account]),
+    filterVisibleAccounts(latestAccounts).map((account) => [
+      account.accountId,
+      account,
+    ]),
   );
   const previousByAccountId = new Map(
-    previousAccounts.map((account) => [account.accountId, account]),
+    filterVisibleAccounts(previousAccounts).map((account) => [
+      account.accountId,
+      account,
+    ]),
   );
   const changedAccounts = Array.from(
     new Set([...latestByAccountId.keys(), ...previousByAccountId.keys()]),
@@ -371,10 +401,14 @@ export async function getDashboardSnapshot(
   const latestRun = successfulRuns[0];
 
   if (!latestRun) {
-    const legacyAccounts = await loadHouseholdAccounts(db, resolvedHouseholdId);
+    const legacyAccounts = filterReportingAccounts(
+      await loadHouseholdAccounts(db, resolvedHouseholdId),
+    );
 
     return {
-      accountTypeGroups: buildAccountTypeGroups(legacyAccounts),
+      accountTypeGroups: buildAccountTypeGroups(
+        filterVisibleAccounts(legacyAccounts),
+      ),
       changeSummary: null,
       hasSuccessfulSync: false,
       householdName: household.name,
@@ -389,7 +423,10 @@ export async function getDashboardSnapshot(
       accountId: accounts.id,
       accountType: accounts.accountType,
       balanceMinor: balanceSnapshots.balanceMinor,
+      displayName: accounts.displayName,
+      includeInHouseholdReporting: accounts.includeInHouseholdReporting,
       institutionName: accounts.institutionName,
+      isHidden: accounts.isHidden,
       name: accounts.name,
       reportingGroup: accounts.reportingGroup,
       sourceSyncRunId: balanceSnapshots.sourceSyncRunId,
@@ -404,31 +441,40 @@ export async function getDashboardSnapshot(
     )
     .where(inArray(balanceSnapshots.sourceSyncRunId, runIds));
 
-  snapshotRows.forEach((account) => {
+  const normalizedSnapshotRows = snapshotRows.map((account) => ({
+    ...account,
+    name: account.displayName ?? account.name,
+  }));
+
+  normalizedSnapshotRows.forEach((account) => {
     assertValidAccount(account, resolvedHouseholdId);
   });
 
-  const latestAccounts = snapshotRows.filter(
+  const latestAccounts = normalizedSnapshotRows.filter(
     (account) => account.sourceSyncRunId === latestRun.id,
   );
   const previousRun = successfulRuns[1];
   const previousAccounts = previousRun
-    ? snapshotRows.filter(
+    ? normalizedSnapshotRows.filter(
         (account) => account.sourceSyncRunId === previousRun.id,
       )
     : [];
+  const latestReportingAccounts = filterReportingAccounts(latestAccounts);
+  const previousReportingAccounts = filterReportingAccounts(previousAccounts);
 
   return {
-    accountTypeGroups: buildAccountTypeGroups(latestAccounts),
+    accountTypeGroups: buildAccountTypeGroups(
+      filterVisibleAccounts(latestReportingAccounts),
+    ),
     changeSummary: buildChangeSummary(
       latestRun,
       previousRun,
-      latestAccounts,
-      previousAccounts,
+      latestReportingAccounts,
+      previousReportingAccounts,
     ),
     hasSuccessfulSync: true,
     householdName: household.name,
     lastSyncedAt: latestRun.completedAt,
-    totals: buildTotals(latestAccounts),
+    totals: buildTotals(latestReportingAccounts),
   };
 }

@@ -1,0 +1,601 @@
+import { Database } from "bun:sqlite";
+import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+function applyMigrations(database: Database) {
+  const migrationsDir = fileURLToPath(
+    new URL("../migrations/", import.meta.url).toString(),
+  );
+  const migrationFiles = readdirSync(migrationsDir)
+    .filter((fileName) => fileName.endsWith(".sql"))
+    .sort();
+
+  for (const fileName of migrationFiles) {
+    database.exec(readFileSync(`${migrationsDir}/${fileName}`, "utf8"));
+  }
+}
+
+function createSchemaTestDatabase() {
+  const sqlite = new Database(":memory:");
+  sqlite.exec("PRAGMA foreign_keys = ON");
+  applyMigrations(sqlite);
+  return sqlite;
+}
+
+describe("schema foundation for provider-backed sync", () => {
+  test("supports provider connections, provider accounts, and canonical account curation defaults", () => {
+    const sqlite = createSchemaTestDatabase();
+    const createdAt = new Date("2026-03-18T00:00:00.000Z").getTime();
+
+    sqlite
+      .query(
+        `
+          insert into households (id, name, last_synced_at, created_at)
+          values (?, ?, ?, ?)
+        `,
+      )
+      .run("household_demo", "Vista Household", createdAt, createdAt);
+
+    sqlite
+      .query(
+        `
+          insert into provider_connections (
+            id,
+            household_id,
+            provider,
+            status,
+            external_connection_id,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "conn_simplefin_us_bank",
+        "household_demo",
+        "simplefin",
+        "active",
+        "simplefin-demo-connection",
+        createdAt,
+        createdAt,
+      );
+
+    sqlite
+      .query(
+        `
+          insert into provider_accounts (
+            id,
+            provider_connection_id,
+            provider_account_id,
+            name,
+            institution_name,
+            account_type,
+            account_subtype,
+            currency,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "prov_acct_checking",
+        "conn_simplefin_us_bank",
+        "simplefin-account-123",
+        "US Bank Platinum Checking",
+        "US Bank",
+        "checking",
+        "checking",
+        "USD",
+        createdAt,
+        createdAt,
+      );
+
+    sqlite
+      .query(
+        `
+          insert into accounts (
+            id,
+            household_id,
+            provider_account_id,
+            name,
+            institution_name,
+            account_type,
+            reporting_group,
+            balance_minor,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "acct_checking",
+        "household_demo",
+        "prov_acct_checking",
+        "Everyday Checking",
+        "US Bank",
+        "checking",
+        "cash",
+        1284500,
+        createdAt,
+        createdAt,
+      );
+
+    expect(
+      sqlite
+        .query(
+          `
+            select
+              provider_account_id as providerAccountId,
+              display_name as displayName,
+              account_subtype as accountSubtype,
+              currency,
+              ownership_type as ownershipType,
+              include_in_household_reporting as includeInHouseholdReporting,
+              is_hidden as isHidden
+            from accounts
+            where id = ?
+          `,
+        )
+        .get("acct_checking"),
+    ).toEqual({
+      accountSubtype: null,
+      currency: "USD",
+      displayName: null,
+      includeInHouseholdReporting: 1,
+      isHidden: 0,
+      ownershipType: "joint",
+      providerAccountId: "prov_acct_checking",
+    });
+  });
+
+  test("enforces one checkpoint per provider connection", () => {
+    const sqlite = createSchemaTestDatabase();
+    const createdAt = new Date("2026-03-18T00:00:00.000Z").getTime();
+
+    sqlite
+      .query(
+        `
+          insert into households (id, name, last_synced_at, created_at)
+          values (?, ?, ?, ?)
+        `,
+      )
+      .run("household_demo", "Vista Household", createdAt, createdAt);
+    sqlite
+      .query(
+        `
+          insert into provider_connections (
+            id,
+            household_id,
+            provider,
+            status,
+            external_connection_id,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "conn_simplefin_us_bank",
+        "household_demo",
+        "simplefin",
+        "active",
+        "simplefin-demo-connection",
+        createdAt,
+        createdAt,
+      );
+
+    const insertCheckpoint = sqlite.query(
+      `
+        insert into sync_checkpoints (
+          id,
+          provider_connection_id,
+          cursor,
+          updated_at
+        )
+        values (?, ?, ?, ?)
+      `,
+    );
+
+    insertCheckpoint.run(
+      "checkpoint_simplefin_1",
+      "conn_simplefin_us_bank",
+      "cursor-1",
+      createdAt,
+    );
+
+    expect(() =>
+      insertCheckpoint.run(
+        "checkpoint_simplefin_2",
+        "conn_simplefin_us_bank",
+        "cursor-2",
+        createdAt,
+      ),
+    ).toThrow();
+  });
+
+  test("stores provider-linked sync runs and deduplicates transactions by account and provider transaction id", () => {
+    const sqlite = createSchemaTestDatabase();
+    const createdAt = new Date("2026-03-18T00:00:00.000Z").getTime();
+
+    sqlite
+      .query(
+        `
+          insert into households (id, name, last_synced_at, created_at)
+          values (?, ?, ?, ?)
+        `,
+      )
+      .run("household_demo", "Vista Household", createdAt, createdAt);
+    sqlite
+      .query(
+        `
+          insert into provider_connections (
+            id,
+            household_id,
+            provider,
+            status,
+            external_connection_id,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "conn_simplefin_us_bank",
+        "household_demo",
+        "simplefin",
+        "active",
+        "simplefin-demo-connection",
+        createdAt,
+        createdAt,
+      );
+    sqlite
+      .query(
+        `
+          insert into provider_accounts (
+            id,
+            provider_connection_id,
+            provider_account_id,
+            name,
+            institution_name,
+            account_type,
+            currency,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "prov_acct_checking",
+        "conn_simplefin_us_bank",
+        "simplefin-account-123",
+        "US Bank Platinum Checking",
+        "US Bank",
+        "checking",
+        "USD",
+        createdAt,
+        createdAt,
+      );
+    sqlite
+      .query(
+        `
+          insert into accounts (
+            id,
+            household_id,
+            provider_account_id,
+            name,
+            institution_name,
+            account_type,
+            reporting_group,
+            balance_minor,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "acct_checking",
+        "household_demo",
+        "prov_acct_checking",
+        "Everyday Checking",
+        "US Bank",
+        "checking",
+        "cash",
+        1284500,
+        createdAt,
+        createdAt,
+      );
+
+    sqlite
+      .query(
+        `
+          insert into sync_runs (
+            id,
+            household_id,
+            provider_connection_id,
+            provider,
+            status,
+            trigger,
+            records_changed,
+            error_summary,
+            started_at,
+            completed_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "sync_simplefin_2026_03_18",
+        "household_demo",
+        "conn_simplefin_us_bank",
+        "simplefin",
+        "failed",
+        "scheduled",
+        3,
+        "Provider returned malformed transaction payload.",
+        createdAt,
+        createdAt,
+      );
+
+    expect(
+      sqlite
+        .query(
+          `
+            select
+              provider_connection_id as providerConnectionId,
+              provider,
+              records_changed as recordsChanged,
+              error_summary as errorSummary
+            from sync_runs
+            where id = ?
+          `,
+        )
+        .get("sync_simplefin_2026_03_18"),
+    ).toEqual({
+      errorSummary: "Provider returned malformed transaction payload.",
+      provider: "simplefin",
+      providerConnectionId: "conn_simplefin_us_bank",
+      recordsChanged: 3,
+    });
+
+    const insertTransaction = sqlite.query(
+      `
+        insert into transactions (
+          id,
+          account_id,
+          provider_transaction_id,
+          posted_at,
+          amount_minor,
+          direction,
+          description,
+          merchant_name,
+          category_raw,
+          category_normalized,
+          exclude_from_reporting,
+          source_sync_run_id
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    );
+
+    insertTransaction.run(
+      "txn_1",
+      "acct_checking",
+      "simplefin-txn-123",
+      createdAt,
+      -4500,
+      "debit",
+      "Coffee Shop",
+      "Coffee Shop",
+      "Food and Drink",
+      null,
+      0,
+      "sync_simplefin_2026_03_18",
+    );
+
+    expect(() =>
+      insertTransaction.run(
+        "txn_2",
+        "acct_checking",
+        "simplefin-txn-123",
+        createdAt,
+        -4500,
+        "debit",
+        "Coffee Shop",
+        "Coffee Shop",
+        "Food and Drink",
+        null,
+        0,
+        "sync_simplefin_2026_03_18",
+      ),
+    ).toThrow();
+  });
+
+  test("stores canonical holdings and deduplicates holding snapshots by holding and sync run", () => {
+    const sqlite = createSchemaTestDatabase();
+    const createdAt = new Date("2026-03-18T00:00:00.000Z").getTime();
+
+    sqlite
+      .query(
+        `
+          insert into households (id, name, last_synced_at, created_at)
+          values (?, ?, ?, ?)
+        `,
+      )
+      .run("household_demo", "Vista Household", createdAt, createdAt);
+    sqlite
+      .query(
+        `
+          insert into accounts (
+            id,
+            household_id,
+            name,
+            institution_name,
+            account_type,
+            reporting_group,
+            balance_minor,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "acct_brokerage",
+        "household_demo",
+        "Taxable Brokerage",
+        "Vanguard",
+        "brokerage",
+        "investments",
+        372012,
+        createdAt,
+        createdAt,
+      );
+    sqlite
+      .query(
+        `
+          insert into sync_runs (
+            id,
+            household_id,
+            provider,
+            status,
+            trigger,
+            records_changed,
+            started_at,
+            completed_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "sync_snaptrade_1",
+        "household_demo",
+        "snaptrade",
+        "succeeded",
+        "scheduled",
+        7,
+        createdAt,
+        createdAt,
+      );
+
+    const insertHolding = sqlite.query(
+      `
+        insert into holdings (
+          id,
+          account_id,
+          holding_key,
+          symbol,
+          name,
+          asset_class,
+          sub_asset_class,
+          currency,
+          created_at,
+          updated_at
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    );
+
+    insertHolding.run(
+      "holding_vti",
+      "acct_brokerage",
+      "symbol:vti",
+      "VTI",
+      "Vanguard Total Stock Market ETF",
+      "equity",
+      "ETF",
+      "USD",
+      createdAt,
+      createdAt,
+    );
+
+    expect(() =>
+      insertHolding.run(
+        "holding_vti_duplicate",
+        "acct_brokerage",
+        "symbol:vti",
+        "VTI",
+        "Duplicate VTI",
+        "equity",
+        "ETF",
+        "USD",
+        createdAt,
+        createdAt,
+      ),
+    ).toThrow();
+
+    const insertSnapshot = sqlite.query(
+      `
+        insert into holding_snapshots (
+          id,
+          holding_id,
+          account_id,
+          source_sync_run_id,
+          captured_at,
+          as_of_date,
+          quantity,
+          price_minor,
+          market_value_minor,
+          cost_basis_minor
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    );
+
+    insertSnapshot.run(
+      "holding_snapshot_vti_sync_1",
+      "holding_vti",
+      "acct_brokerage",
+      "sync_snaptrade_1",
+      createdAt,
+      "2026-03-18",
+      "10",
+      30000,
+      300000,
+      250000,
+    );
+
+    expect(() =>
+      insertSnapshot.run(
+        "holding_snapshot_vti_sync_1_duplicate",
+        "holding_vti",
+        "acct_brokerage",
+        "sync_snaptrade_1",
+        createdAt,
+        "2026-03-18",
+        "10",
+        30000,
+        300000,
+        250000,
+      ),
+    ).toThrow();
+
+    expect(
+      sqlite
+        .query(
+          `
+            select
+              holding_key as holdingKey,
+              symbol,
+              asset_class as assetClass,
+              sub_asset_class as subAssetClass
+            from holdings
+            where id = ?
+          `,
+        )
+        .get("holding_vti"),
+    ).toEqual({
+      assetClass: "equity",
+      holdingKey: "symbol:vti",
+      subAssetClass: "ETF",
+      symbol: "VTI",
+    });
+  });
+});

@@ -12,7 +12,9 @@
     "typecheck": "bun run cf-typegen && tsc --noEmit"
   },
   "dependencies": {
-    "@vista/db": "workspace:*"
+    "@vista/db": "workspace:*",
+    "@vista/simplefin": "workspace:*",
+    "@vista/snaptrade": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",

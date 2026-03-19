@@ -1,6 +1,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveDevPort } from "./dev-ports";
+
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -25,6 +27,9 @@ const syncWranglerBin = path.join(
   ".bin",
   process.platform === "win32" ? "wrangler.cmd" : "wrangler",
 );
+const host = "127.0.0.1";
+const defaultWebPort = 5173;
+const defaultSyncPort = 8788;
 
 type RunningProcess = {
   label: string;
@@ -130,9 +135,32 @@ function spawnService(
 async function main() {
   await ensureLocalDbReady();
 
+  const webPort = await resolveDevPort({
+    defaultPort: defaultWebPort,
+    envValue: process.env.VISTA_WEB_PORT,
+    host,
+    label: "web",
+  });
+  const syncPort = await resolveDevPort({
+    defaultPort: defaultSyncPort,
+    envValue: process.env.VISTA_SYNC_PORT,
+    host,
+    label: "sync",
+  });
+
   logStep("Starting development services");
-  console.log("[dev] Web:  http://127.0.0.1:5173");
-  console.log("[dev] Sync: http://127.0.0.1:8788");
+  if (webPort.usedFallback) {
+    console.log(
+      `[dev] Web port ${defaultWebPort} is busy, using ${webPort.port} instead.`,
+    );
+  }
+  if (syncPort.usedFallback) {
+    console.log(
+      `[dev] Sync port ${defaultSyncPort} is busy, using ${syncPort.port} instead.`,
+    );
+  }
+  console.log(`[dev] Web:  http://${host}:${webPort.port}`);
+  console.log(`[dev] Sync: http://${host}:${syncPort.port}`);
 
   const services = [
     spawnService(
@@ -141,9 +169,9 @@ async function main() {
         reactRouterBin,
         "dev",
         "--host",
-        "127.0.0.1",
+        host,
         "--port",
-        "5173",
+        String(webPort.port),
         "--strictPort",
       ],
       webAppDir,
@@ -155,7 +183,7 @@ async function main() {
         "dev",
         "--test-scheduled",
         "--port",
-        "8788",
+        String(syncPort.port),
         "--persist-to",
         "../web/.wrangler/state",
       ],

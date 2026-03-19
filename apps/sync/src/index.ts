@@ -1,6 +1,17 @@
 import { getDashboardSnapshot, getDb } from "@vista/db";
 
 import { ingestDemoSyncBatch } from "./fixture-sync";
+import { syncConfiguredSimplefinConnections } from "./simplefin-sync";
+import { syncConfiguredSnaptradeConnections } from "./snaptrade-sync";
+
+function readOptionalEnvString(
+  env: Env,
+  key: "SNAPTRADE_CLIENT_ID" | "SNAPTRADE_CONSUMER_KEY",
+) {
+  const value = (env as Env & Record<string, unknown>)[key];
+
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
 
 async function readSnapshot(env: Env) {
   const db = getDb(env.DB);
@@ -41,18 +52,37 @@ export default {
   },
 
   async scheduled(event, env) {
-    const ingestResult = await ingestDemoSyncBatch(env.DB);
+    const simplefinResults = await syncConfiguredSimplefinConnections({
+      database: env.DB,
+    });
+    const snaptradeResults = await syncConfiguredSnaptradeConnections({
+      clientId: readOptionalEnvString(env, "SNAPTRADE_CLIENT_ID"),
+      consumerKey: readOptionalEnvString(env, "SNAPTRADE_CONSUMER_KEY"),
+      database: env.DB,
+    });
+    const syncResults = [...simplefinResults, ...snaptradeResults];
+    const ingestResult =
+      syncResults.length === 0 ? await ingestDemoSyncBatch(env.DB) : null;
     const snapshot = await readSnapshot(env);
+    const logPayload = ingestResult
+      ? {
+          createdRun: ingestResult.created,
+          cron: event.cron,
+          household: snapshot?.householdName ?? null,
+          lastSyncedAt: snapshot?.lastSyncedAt.toISOString() ?? null,
+          netWorthMinor: snapshot?.totals.netWorthMinor ?? null,
+          runId: ingestResult.runId,
+        }
+      : {
+          cron: event.cron,
+          household: snapshot?.householdName ?? null,
+          lastSyncedAt: snapshot?.lastSyncedAt.toISOString() ?? null,
+          netWorthMinor: snapshot?.totals.netWorthMinor ?? null,
+          runId: syncResults[0]?.runId ?? null,
+          syncedConnections: syncResults.length,
+          usedFixtureData: false,
+        };
 
-    console.log(
-      JSON.stringify({
-        createdRun: ingestResult.created,
-        cron: event.cron,
-        household: snapshot?.householdName ?? null,
-        lastSyncedAt: snapshot?.lastSyncedAt.toISOString() ?? null,
-        netWorthMinor: snapshot?.totals.netWorthMinor ?? null,
-        runId: ingestResult.runId,
-      }),
-    );
+    console.log(JSON.stringify(logPayload));
   },
 } satisfies ExportedHandler<Env>;
