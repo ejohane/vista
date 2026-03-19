@@ -250,6 +250,27 @@ function insertSucceededRun(
 }
 
 describe("getDashboardSnapshot", () => {
+  test("falls back to legacy account balances when no successful sync runs exist yet", async () => {
+    const { db } = createTestDb();
+
+    const snapshot = await getDashboardSnapshot(db);
+
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.hasSuccessfulSync).toBe(false);
+    expect(snapshot?.changeSummary).toBeNull();
+    expect(snapshot?.totals).toEqual({
+      cashMinor: 187,
+      investmentsMinor: 143,
+      netWorthMinor: 330,
+    });
+    expect(snapshot?.accountTypeGroups.map((group) => group.key)).toEqual([
+      "checking",
+      "savings",
+      "brokerage",
+      "retirement",
+    ]);
+  });
+
   test("aggregates the dashboard from balance snapshots instead of legacy account balances", async () => {
     const { db, sqlite } = createTestDb();
 
@@ -279,6 +300,7 @@ describe("getDashboardSnapshot", () => {
     const snapshot = await getDashboardSnapshot(db);
 
     expect(snapshot).not.toBeNull();
+    expect(snapshot?.hasSuccessfulSync).toBe(true);
     expect(snapshot?.lastSyncedAt.toISOString()).toBe(
       "2026-03-16T18:30:00.000Z",
     );
@@ -326,6 +348,7 @@ describe("getDashboardSnapshot", () => {
 
     const snapshot = await getDashboardSnapshot(db);
 
+    expect(snapshot?.hasSuccessfulSync).toBe(true);
     expect(snapshot?.changeSummary).toEqual({
       cashDeltaMinor: 72100,
       changedAccounts: [
@@ -410,6 +433,7 @@ describe("getDashboardSnapshot", () => {
 
     const snapshot = await getDashboardSnapshot(db);
 
+    expect(snapshot?.hasSuccessfulSync).toBe(true);
     expect(snapshot?.changeSummary).toBeNull();
     expect(snapshot?.totals.netWorthMinor).toBe(45574310);
   });

@@ -21,6 +21,28 @@ describe("sync worker", () => {
 
     expect(body).toEqual({
       nextStep:
+        "Run bun run db:seed:local to load the demo household before exercising the sync worker locally.",
+      status: "waiting_for_seed",
+      syncedHousehold: null,
+    });
+  });
+
+  test("fetch stays in waiting_for_seed until a successful run exists", async () => {
+    const { d1, sqlite } = createSeededSyncDatabase();
+    sqlite.exec("delete from balance_snapshots");
+    sqlite.exec("delete from sync_runs");
+
+    const response = await worker.fetch(new Request("http://127.0.0.1:8788/"), {
+      DB: d1,
+    } as Env);
+    const body = (await response.json()) as {
+      nextStep: string;
+      status: string;
+      syncedHousehold: string | null;
+    };
+
+    expect(body).toEqual({
+      nextStep:
         'Run curl "http://127.0.0.1:8788/__scheduled?cron=0+13+*+*+*" to exercise the scheduled handler locally.',
       status: "waiting_for_seed",
       syncedHousehold: null,

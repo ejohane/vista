@@ -46,8 +46,16 @@ export class FakeD1PreparedStatement {
   }
 
   async run() {
-    this.database.query(this.query).run(...(this.values as never[]));
-    return { success: true };
+    const result = this.database
+      .query(this.query)
+      .run(...(this.values as never[]));
+
+    return {
+      meta: {
+        changes: result.changes,
+      },
+      success: true,
+    };
   }
 }
 

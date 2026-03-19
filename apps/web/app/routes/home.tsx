@@ -117,6 +117,7 @@ function filterAccountGroups(groups: AccountGroup[], query: string) {
 function buildChangeSummaryDetail(changeSummary: ReadyChangeSummary) {
   const largestGroup = changeSummary.changedGroups[0];
   const leadingAccounts = changeSummary.changedAccounts
+    .filter((account) => account.accountType === largestGroup?.key)
     .slice(0, 2)
     .map((account) => account.name);
 
@@ -131,6 +132,28 @@ function buildChangeSummaryDetail(changeSummary: ReadyChangeSummary) {
       : "";
 
   return `${largestGroup.label} drove the biggest move ${direction} compared with ${formatUpdatedAt(changeSummary.comparedToCompletedAt)}${accountsText}.`;
+}
+
+function getPendingChangeSummaryCopy(hasSuccessfulSync: boolean) {
+  if (hasSuccessfulSync) {
+    return {
+      badge: "Waiting for another sync",
+      description:
+        "Change summary becomes available after the next successful sync creates a comparison point.",
+      detail:
+        "The first successful run established the current snapshot. Vista starts explaining movement once a later sync can be compared against it.",
+      title: "Change summary available after the next sync",
+    };
+  }
+
+  return {
+    badge: "Waiting for first sync",
+    description:
+      "Change summary becomes available after the first successful sync establishes snapshot history.",
+    detail:
+      "This household is rendering the current balances, but Vista still needs the first successful sync run before it can explain movement over time.",
+    title: "Change summary available after the first successful sync",
+  };
 }
 
 function MetricCard({
@@ -244,6 +267,7 @@ export async function loader({ context }: Route.LoaderArgs) {
             snapshot.changeSummary.comparedToCompletedAt.toISOString(),
         }
       : null,
+    hasSuccessfulSync: snapshot.hasSuccessfulSync,
     householdName: snapshot.householdName,
     lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
     totals: snapshot.totals,
@@ -255,6 +279,10 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   const normalizedSearch = searchValue.trim().toLowerCase();
   const changeSummary =
     loaderData.kind === "ready" ? loaderData.changeSummary : null;
+  const pendingChangeSummaryCopy =
+    loaderData.kind === "ready"
+      ? getPendingChangeSummaryCopy(loaderData.hasSuccessfulSync)
+      : null;
   const totalAccountCount =
     loaderData.kind === "ready"
       ? loaderData.accountTypeGroups.reduce(
@@ -385,7 +413,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           loaderData.kind === "ready"
             ? normalizedSearch
               ? `Filtering account cards for "${searchValue}".`
-              : `Synced ${formatUpdatedAt(loaderData.lastSyncedAt)}.`
+              : loaderData.hasSuccessfulSync
+                ? `Synced ${formatUpdatedAt(loaderData.lastSyncedAt)}.`
+                : "Loaded current balances while waiting for the first successful sync."
             : `Run ${loaderData.nextStepCommand} and refresh the page.`
         }
         onSearchValueChange={setSearchValue}
@@ -400,7 +430,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         status={loaderData.kind}
         subtitle={
           loaderData.kind === "ready"
-            ? `Updated ${formatUpdatedAt(loaderData.lastSyncedAt)}`
+            ? loaderData.hasSuccessfulSync
+              ? `Updated ${formatUpdatedAt(loaderData.lastSyncedAt)}`
+              : "Awaiting the first successful sync"
             : "Awaiting the first local snapshot"
         }
         summary={sidebarSummary}
@@ -466,7 +498,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                           <CardDescription className="max-w-3xl leading-6">
                             {changeSummary
                               ? buildChangeSummaryDetail(changeSummary)
-                              : "Change summary becomes available after the next successful sync creates a comparison point."}
+                              : pendingChangeSummaryCopy?.description}
                           </CardDescription>
                         </div>
                         <Badge
@@ -475,7 +507,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                         >
                           {changeSummary
                             ? `Compared to ${formatUpdatedAt(changeSummary.comparedToCompletedAt)}`
-                            : "Waiting for another sync"}
+                            : pendingChangeSummaryCopy?.badge}
                         </Badge>
                       </div>
                     </CardHeader>
@@ -501,83 +533,97 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                               <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
                                 Changed account groups
                               </p>
-                              <ul className="mt-4 space-y-3">
-                                {changeSummary.changedGroups.map((group) => (
-                                  <li
-                                    key={group.key}
-                                    className="flex items-center justify-between gap-4"
-                                  >
-                                    <div>
-                                      <p className="font-medium">
-                                        {group.label}
-                                      </p>
-                                      <p className="text-sm text-muted-foreground">
-                                        Now {formatUsd(group.latestTotalMinor)}
-                                      </p>
-                                    </div>
-                                    <p
-                                      className={cn(
-                                        "shrink-0 text-sm font-semibold",
-                                        group.deltaMinor > 0 &&
-                                          "text-emerald-700",
-                                        group.deltaMinor < 0 && "text-rose-700",
-                                      )}
-                                    >
-                                      {formatSignedUsd(group.deltaMinor)}
-                                    </p>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                            <div className="rounded-2xl border border-border/70 bg-background/75 p-4">
-                              <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
-                                Largest account moves
-                              </p>
-                              <ul className="mt-4 space-y-3">
-                                {changeSummary.changedAccounts.map(
-                                  (account) => (
+                              {changeSummary.changedGroups.length ? (
+                                <ul className="mt-4 space-y-3">
+                                  {changeSummary.changedGroups.map((group) => (
                                     <li
-                                      key={account.id}
-                                      className="flex items-start justify-between gap-4"
+                                      key={group.key}
+                                      className="flex items-center justify-between gap-4"
                                     >
-                                      <div className="min-w-0">
+                                      <div>
                                         <p className="font-medium">
-                                          {account.name}
+                                          {group.label}
                                         </p>
-                                        <p className="mt-1 text-sm text-muted-foreground">
-                                          {account.institutionName} · now{" "}
-                                          {formatUsd(
-                                            account.latestBalanceMinor,
-                                          )}
+                                        <p className="text-sm text-muted-foreground">
+                                          Now{" "}
+                                          {formatUsd(group.latestTotalMinor)}
                                         </p>
                                       </div>
                                       <p
                                         className={cn(
                                           "shrink-0 text-sm font-semibold",
-                                          account.deltaMinor > 0 &&
+                                          group.deltaMinor > 0 &&
                                             "text-emerald-700",
-                                          account.deltaMinor < 0 &&
+                                          group.deltaMinor < 0 &&
                                             "text-rose-700",
                                         )}
                                       >
-                                        {formatSignedUsd(account.deltaMinor)}
+                                        {formatSignedUsd(group.deltaMinor)}
                                       </p>
                                     </li>
-                                  ),
-                                )}
-                              </ul>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="mt-4 text-sm leading-6 text-muted-foreground">
+                                  No account groups moved between the latest two
+                                  snapshots.
+                                </p>
+                              )}
+                            </div>
+                            <div className="rounded-2xl border border-border/70 bg-background/75 p-4">
+                              <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
+                                Largest account moves
+                              </p>
+                              {changeSummary.changedAccounts.length ? (
+                                <ul className="mt-4 space-y-3">
+                                  {changeSummary.changedAccounts.map(
+                                    (account) => (
+                                      <li
+                                        key={account.id}
+                                        className="flex items-start justify-between gap-4"
+                                      >
+                                        <div className="min-w-0">
+                                          <p className="font-medium">
+                                            {account.name}
+                                          </p>
+                                          <p className="mt-1 text-sm text-muted-foreground">
+                                            {account.institutionName} · now{" "}
+                                            {formatUsd(
+                                              account.latestBalanceMinor,
+                                            )}
+                                          </p>
+                                        </div>
+                                        <p
+                                          className={cn(
+                                            "shrink-0 text-sm font-semibold",
+                                            account.deltaMinor > 0 &&
+                                              "text-emerald-700",
+                                            account.deltaMinor < 0 &&
+                                              "text-rose-700",
+                                          )}
+                                        >
+                                          {formatSignedUsd(account.deltaMinor)}
+                                        </p>
+                                      </li>
+                                    ),
+                                  )}
+                                </ul>
+                              ) : (
+                                <p className="mt-4 text-sm leading-6 text-muted-foreground">
+                                  No individual accounts moved between the
+                                  latest two snapshots.
+                                </p>
+                              )}
                             </div>
                           </div>
                         </>
                       ) : (
                         <div className="rounded-2xl border border-dashed border-border/80 bg-background/70 p-5">
                           <p className="font-medium">
-                            Change summary available after the next sync
+                            {pendingChangeSummaryCopy?.title}
                           </p>
                           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                            The first successful run establishes the current
-                            snapshot. Vista starts explaining movement once a
-                            later sync can be compared against it.
+                            {pendingChangeSummaryCopy?.detail}
                           </p>
                         </div>
                       )}

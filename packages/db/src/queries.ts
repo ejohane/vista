@@ -73,6 +73,7 @@ export type DashboardSnapshot = {
     investmentsDeltaMinor: number;
     netWorthDeltaMinor: number;
   };
+  hasSuccessfulSync: boolean;
   householdName: string;
   lastSyncedAt: Date;
   totals: {
@@ -193,6 +194,30 @@ function createAccountTypeTotals() {
     retirement: 0,
     savings: 0,
   } satisfies Record<keyof typeof accountTypeLabels, number>;
+}
+
+async function loadHouseholdAccounts(
+  db: DashboardDb,
+  householdId: string,
+): Promise<HouseholdAccountSnapshot[]> {
+  const accountRows = await db
+    .select({
+      accountId: accounts.id,
+      accountType: accounts.accountType,
+      balanceMinor: accounts.balanceMinor,
+      institutionName: accounts.institutionName,
+      name: accounts.name,
+      reportingGroup: accounts.reportingGroup,
+      sourceSyncRunId: accounts.id,
+    })
+    .from(accounts)
+    .where(eq(accounts.householdId, householdId));
+
+  accountRows.forEach((account) => {
+    assertValidAccount(account, householdId);
+  });
+
+  return accountRows;
 }
 
 function buildChangeSummary(
@@ -346,12 +371,15 @@ export async function getDashboardSnapshot(
   const latestRun = successfulRuns[0];
 
   if (!latestRun) {
+    const legacyAccounts = await loadHouseholdAccounts(db, resolvedHouseholdId);
+
     return {
-      accountTypeGroups: [],
+      accountTypeGroups: buildAccountTypeGroups(legacyAccounts),
       changeSummary: null,
+      hasSuccessfulSync: false,
       householdName: household.name,
       lastSyncedAt: household.lastSyncedAt,
-      totals: { cashMinor: 0, investmentsMinor: 0, netWorthMinor: 0 },
+      totals: buildTotals(legacyAccounts),
     };
   }
 
@@ -398,6 +426,7 @@ export async function getDashboardSnapshot(
       latestAccounts,
       previousAccounts,
     ),
+    hasSuccessfulSync: true,
     householdName: household.name,
     lastSyncedAt: latestRun.completedAt,
     totals: buildTotals(latestAccounts),
