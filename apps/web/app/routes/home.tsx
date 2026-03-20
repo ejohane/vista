@@ -21,6 +21,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -625,6 +626,34 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                           <p className="mt-2 text-sm leading-6 text-muted-foreground">
                             {pendingChangeSummaryCopy?.detail}
                           </p>
+                          {!loaderData.hasSuccessfulSync ? (
+                            <div className="mt-4 flex flex-wrap items-center gap-3">
+                              <a
+                                href="/connect/simplefin"
+                                className={cn(
+                                  buttonVariants({
+                                    size: "sm",
+                                    variant: "outline",
+                                  }),
+                                  "w-fit",
+                                )}
+                              >
+                                Connect SimpleFIN
+                              </a>
+                              <a
+                                href="/connect/snaptrade"
+                                className={cn(
+                                  buttonVariants({
+                                    size: "sm",
+                                    variant: "ghost",
+                                  }),
+                                  "w-fit",
+                                )}
+                              >
+                                Connect SnapTrade
+                              </a>
+                            </div>
+                          ) : null}
                         </div>
                       )}
                     </CardContent>
@@ -642,14 +671,38 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                         visible totals aligned with the current filter.
                       </p>
                     </div>
-                    {normalizedSearch ? (
-                      <Badge
-                        variant="outline"
-                        className="w-fit border-border/80 bg-background/80"
+                    <div className="flex flex-wrap items-center gap-3">
+                      {normalizedSearch ? (
+                        <Badge
+                          variant="outline"
+                          className="w-fit border-border/80 bg-background/80"
+                        >
+                          Query: {searchValue}
+                        </Badge>
+                      ) : null}
+                      <a
+                        href="/portfolio"
+                        className={cn(
+                          buttonVariants({
+                            size: "sm",
+                            variant: "ghost",
+                          }),
+                        )}
                       >
-                        Query: {searchValue}
-                      </Badge>
-                    ) : null}
+                        View portfolio
+                      </a>
+                      <a
+                        href="/accounts/review"
+                        className={cn(
+                          buttonVariants({
+                            size: "sm",
+                            variant: "outline",
+                          }),
+                        )}
+                      >
+                        Review accounts
+                      </a>
+                    </div>
                   </div>
                   {filteredGroups.length ? (
                     <div className="grid gap-4 xl:grid-cols-2">
@@ -752,6 +805,44 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                       title="Shared package contract"
                     />
                   </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <a
+                      href="/connect/simplefin"
+                      className={cn(
+                        buttonVariants({
+                          size: "default",
+                          variant: "outline",
+                        }),
+                        "w-fit",
+                      )}
+                    >
+                      Connect another SimpleFIN token
+                    </a>
+                    <a
+                      href="/connect/snaptrade"
+                      className={cn(
+                        buttonVariants({
+                          size: "default",
+                          variant: "outline",
+                        }),
+                        "w-fit",
+                      )}
+                    >
+                      Connect SnapTrade
+                    </a>
+                    <a
+                      href="/accounts/review"
+                      className={cn(
+                        buttonVariants({
+                          size: "default",
+                          variant: "ghost",
+                        }),
+                        "w-fit",
+                      )}
+                    >
+                      Review account curation
+                    </a>
+                  </div>
                 </section>
               </>
             ) : (
@@ -803,6 +894,32 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                           </code>{" "}
                           to load a sample household snapshot into local D1.
                         </p>
+                        <div className="mt-4 flex flex-wrap items-center gap-3">
+                          <a
+                            href="/connect/simplefin"
+                            className={cn(
+                              buttonVariants({
+                                size: "sm",
+                                variant: "outline",
+                              }),
+                              "w-fit",
+                            )}
+                          >
+                            Connect SimpleFIN
+                          </a>
+                          <a
+                            href="/connect/snaptrade"
+                            className={cn(
+                              buttonVariants({
+                                size: "sm",
+                                variant: "ghost",
+                              }),
+                              "w-fit",
+                            )}
+                          >
+                            Connect SnapTrade
+                          </a>
+                        </div>
                       </div>
                       <div className="rounded-2xl border border-border/70 bg-background/75 p-4">
                         <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">

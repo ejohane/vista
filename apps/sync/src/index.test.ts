@@ -29,6 +29,7 @@ describe("sync worker", () => {
 
   test("fetch stays in waiting_for_seed until a successful run exists", async () => {
     const { d1, sqlite } = createSeededSyncDatabase();
+    sqlite.exec("delete from holding_snapshots");
     sqlite.exec("delete from balance_snapshots");
     sqlite.exec("delete from sync_runs");
 
@@ -51,6 +52,14 @@ describe("sync worker", () => {
 
   test("scheduled adds the demo run once and logs createdRun state", async () => {
     const { d1, sqlite } = createSeededSyncDatabase();
+    sqlite.exec(
+      `
+        update provider_connections
+        set status = 'disconnected',
+            access_url = null,
+            access_secret = null
+      `,
+    );
     const consoleLog = mock(() => {});
     const originalConsoleLog = console.log;
     console.log = consoleLog;
@@ -102,5 +111,196 @@ describe("sync worker", () => {
         runId: "sync_demo_2026_03_17",
       }),
     );
+  });
+
+  test("scheduled prefers configured SimpleFIN connections over the demo fixture path", async () => {
+    const { d1, sqlite } = createEmptySyncDatabase();
+    const createdAt = new Date("2026-03-15T12:00:00.000Z").getTime();
+    const nowEpochSeconds = Math.floor(
+      new Date("2026-03-18T18:30:00.000Z").getTime() / 1000,
+    );
+
+    sqlite
+      .query(
+        `
+          insert into households (id, name, last_synced_at, created_at)
+          values (?, ?, ?, ?)
+        `,
+      )
+      .run("household_demo", "Vista Household", createdAt, createdAt);
+    sqlite
+      .query(
+        `
+          insert into provider_connections (
+            id,
+            household_id,
+            provider,
+            status,
+            external_connection_id,
+            access_url,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "conn_simplefin_us_bank",
+        "household_demo",
+        "simplefin",
+        "active",
+        "simplefin-us-bank",
+        "https://demo-user:demo-pass@bridge.example/simplefin",
+        createdAt,
+        createdAt,
+      );
+
+    const fetchMock = mock(async () => {
+      return new Response(
+        JSON.stringify({
+          accounts: [
+            {
+              balance: "1023.45",
+              "balance-date": nowEpochSeconds,
+              currency: "USD",
+              id: "checking-123",
+              name: "Everyday Checking",
+              org: {
+                domain: "usbank.com",
+                name: "US Bank",
+                "sfin-url": "https://bridge.simplefin.org/simplefin",
+              },
+              transactions: [],
+            },
+          ],
+          errors: [],
+        }),
+        {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        },
+      );
+    });
+    const originalFetch = globalThis.fetch;
+    const consoleLog = mock(() => {});
+    const originalConsoleLog = console.log;
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    console.log = consoleLog;
+
+    try {
+      await worker.scheduled(
+        { cron: "0 13 * * *" } as ScheduledEvent,
+        { DB: d1 } as Env,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      console.log = originalConsoleLog;
+    }
+
+    expect(
+      sqlite.query("select count(*) as count from sync_runs").get(),
+    ).toEqual({ count: 1 });
+    expect(
+      sqlite
+        .query(
+          "select count(*) as count from provider_accounts where provider_connection_id = ?",
+        )
+        .get("conn_simplefin_us_bank"),
+    ).toEqual({ count: 1 });
+    expect(
+      sqlite
+        .query(
+          "select count(*) as count from balance_snapshots where source_sync_run_id not like 'sync_demo_%'",
+        )
+        .get(),
+    ).toEqual({ count: 1 });
+    expect(consoleLog).toHaveBeenCalledTimes(1);
+    const firstConsoleCall = (
+      consoleLog.mock.calls as unknown as Array<unknown[]>
+    )[0];
+    const loggedPayload = String(firstConsoleCall?.[0] ?? "");
+    expect(loggedPayload).toContain('"syncedConnections":1');
+    expect(loggedPayload).toContain('"usedFixtureData":false');
+  });
+
+  test("scheduled does not fall back to fixture data when a configured connection fails", async () => {
+    const { d1, sqlite } = createEmptySyncDatabase();
+    const createdAt = new Date("2026-03-15T12:00:00.000Z").getTime();
+
+    sqlite
+      .query(
+        `
+          insert into households (id, name, last_synced_at, created_at)
+          values (?, ?, ?, ?)
+        `,
+      )
+      .run("household_demo", "Vista Household", createdAt, createdAt);
+    sqlite
+      .query(
+        `
+          insert into provider_connections (
+            id,
+            household_id,
+            provider,
+            status,
+            external_connection_id,
+            access_url,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "conn_simplefin_broken",
+        "household_demo",
+        "simplefin",
+        "active",
+        "simplefin-broken",
+        "https://demo-user:demo-pass@bridge.example/simplefin",
+        createdAt,
+        createdAt,
+      );
+
+    const fetchMock = mock(async () => {
+      return new Response("forbidden", { status: 403 });
+    });
+    const originalFetch = globalThis.fetch;
+    const consoleLog = mock(() => {});
+    const originalConsoleLog = console.log;
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    console.log = consoleLog;
+
+    try {
+      await worker.scheduled(
+        { cron: "0 13 * * *" } as ScheduledEvent,
+        { DB: d1 } as Env,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      console.log = originalConsoleLog;
+    }
+
+    expect(
+      sqlite
+        .query(
+          "select count(*) as count from sync_runs where id like 'sync_demo_%'",
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+    expect(
+      sqlite
+        .query(
+          "select count(*) as count from sync_runs where status = 'failed'",
+        )
+        .get(),
+    ).toEqual({ count: 1 });
+    expect(consoleLog).toHaveBeenCalledTimes(1);
+    const firstConsoleCall = (
+      consoleLog.mock.calls as unknown as Array<unknown[]>
+    )[0];
+    const loggedPayload = String(firstConsoleCall?.[0] ?? "");
+    expect(loggedPayload).toContain('"syncedConnections":0');
+    expect(loggedPayload).toContain('"usedFixtureData":false');
   });
 });
