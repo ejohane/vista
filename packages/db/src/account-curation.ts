@@ -13,6 +13,7 @@ import {
 const accountTypeOrder = [
   "checking",
   "savings",
+  "credit_card",
   "brokerage",
   "retirement",
 ] as const;

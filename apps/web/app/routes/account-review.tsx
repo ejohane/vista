@@ -45,6 +45,7 @@ import type { Route } from "./+types/account-review";
 const accountTypeLabels = {
   brokerage: "Brokerage",
   checking: "Checking",
+  credit_card: "Credit Card",
   retirement: "Retirement",
   savings: "Savings",
 } as const;

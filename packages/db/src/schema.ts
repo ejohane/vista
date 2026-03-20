@@ -28,6 +28,18 @@ export type ProviderConnectionStatus =
 export const ownershipTypes = ["mine", "wife", "joint"] as const;
 export type OwnershipType = (typeof ownershipTypes)[number];
 
+export const accountTypes = [
+  "checking",
+  "savings",
+  "credit_card",
+  "brokerage",
+  "retirement",
+] as const;
+export type AccountType = (typeof accountTypes)[number];
+
+export const reportingGroups = ["cash", "liabilities", "investments"] as const;
+export type ReportingGroup = (typeof reportingGroups)[number];
+
 export const transactionDirections = ["credit", "debit"] as const;
 export type TransactionDirection = (typeof transactionDirections)[number];
 
@@ -89,7 +101,7 @@ export const providerAccounts = sqliteTable(
   {
     accountSubtype: text("account_subtype"),
     accountType: text("account_type", {
-      enum: ["checking", "savings", "brokerage", "retirement"],
+      enum: accountTypes,
     }).notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     currency: text("currency").notNull().default("USD"),
@@ -105,7 +117,7 @@ export const providerAccounts = sqliteTable(
   (table) => [
     check(
       "provider_accounts_account_type_check",
-      sql`${table.accountType} in ('checking', 'savings', 'brokerage', 'retirement')`,
+      sql`${table.accountType} in ('checking', 'savings', 'credit_card', 'brokerage', 'retirement')`,
     ),
     index("provider_accounts_connection_idx").on(table.providerConnectionId),
     uniqueIndex("provider_accounts_connection_native_idx").on(
@@ -120,7 +132,7 @@ export const accounts = sqliteTable(
   {
     accountSubtype: text("account_subtype"),
     accountType: text("account_type", {
-      enum: ["checking", "savings", "brokerage", "retirement"],
+      enum: accountTypes,
     }).notNull(),
     balanceMinor: integer("balance_minor").notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
@@ -151,23 +163,25 @@ export const accounts = sqliteTable(
       () => providerAccounts.id,
     ),
     reportingGroup: text("reporting_group", {
-      enum: ["cash", "investments"],
+      enum: reportingGroups,
     }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [
     check(
       "accounts_account_type_check",
-      sql`${table.accountType} in ('checking', 'savings', 'brokerage', 'retirement')`,
+      sql`${table.accountType} in ('checking', 'savings', 'credit_card', 'brokerage', 'retirement')`,
     ),
     check(
       "accounts_reporting_group_check",
-      sql`${table.reportingGroup} in ('cash', 'investments')`,
+      sql`${table.reportingGroup} in ('cash', 'liabilities', 'investments')`,
     ),
     check(
       "accounts_reporting_group_matches_type_check",
       sql`(
       (${table.accountType} in ('checking', 'savings') and ${table.reportingGroup} = 'cash')
+      or
+      (${table.accountType} = 'credit_card' and ${table.reportingGroup} = 'liabilities')
       or
       (${table.accountType} in ('brokerage', 'retirement') and ${table.reportingGroup} = 'investments')
     )`,

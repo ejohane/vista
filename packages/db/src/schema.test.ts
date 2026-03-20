@@ -152,6 +152,125 @@ describe("schema foundation for provider-backed sync", () => {
     });
   });
 
+  test("allows provider-backed credit-card accounts to land in liabilities", () => {
+    const sqlite = createSchemaTestDatabase();
+    const createdAt = new Date("2026-03-18T00:00:00.000Z").getTime();
+
+    sqlite
+      .query(
+        `
+          insert into households (id, name, last_synced_at, created_at)
+          values (?, ?, ?, ?)
+        `,
+      )
+      .run("household_demo", "Vista Household", createdAt, createdAt);
+    sqlite
+      .query(
+        `
+          insert into provider_connections (
+            id,
+            household_id,
+            provider,
+            status,
+            external_connection_id,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "conn_simplefin_us_bank",
+        "household_demo",
+        "simplefin",
+        "active",
+        "simplefin-demo-connection",
+        createdAt,
+        createdAt,
+      );
+
+    sqlite
+      .query(
+        `
+          insert into provider_accounts (
+            id,
+            provider_connection_id,
+            provider_account_id,
+            name,
+            institution_name,
+            account_type,
+            account_subtype,
+            currency,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "prov_acct_credit_card",
+        "conn_simplefin_us_bank",
+        "simplefin-account-cc-123",
+        "Primary Credit Card",
+        "US Bank",
+        "credit_card",
+        "credit_card",
+        "USD",
+        createdAt,
+        createdAt,
+      );
+
+    sqlite
+      .query(
+        `
+          insert into accounts (
+            id,
+            household_id,
+            provider_account_id,
+            name,
+            institution_name,
+            account_type,
+            reporting_group,
+            balance_minor,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "acct_credit_card",
+        "household_demo",
+        "prov_acct_credit_card",
+        "Primary Credit Card",
+        "US Bank",
+        "credit_card",
+        "liabilities",
+        -12345,
+        createdAt,
+        createdAt,
+      );
+
+    expect(
+      sqlite
+        .query(
+          `
+            select
+              account_type as accountType,
+              reporting_group as reportingGroup,
+              balance_minor as balanceMinor
+            from accounts
+            where id = ?
+          `,
+        )
+        .get("acct_credit_card"),
+    ).toEqual({
+      accountType: "credit_card",
+      balanceMinor: -12345,
+      reportingGroup: "liabilities",
+    });
+  });
+
   test("enforces one checkpoint per provider connection", () => {
     const sqlite = createSchemaTestDatabase();
     const createdAt = new Date("2026-03-18T00:00:00.000Z").getTime();

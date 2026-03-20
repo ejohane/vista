@@ -115,17 +115,41 @@ function parseCurrencyAmountToMinor(value: string) {
   return isNegative ? -minor : minor;
 }
 
-function inferCashAccountType(name: string): "checking" | "savings" {
+function inferSimplefinAccountClassification(name: string) {
   const normalizedName = name.toLowerCase();
+
+  if (
+    normalizedName.includes("credit card") ||
+    normalizedName.includes(" mastercard") ||
+    normalizedName.includes("mastercard") ||
+    normalizedName.includes("visa") ||
+    normalizedName.includes("amex") ||
+    normalizedName.includes("american express") ||
+    normalizedName.includes("discover")
+  ) {
+    return {
+      accountSubtype: "credit_card" as const,
+      accountType: "credit_card" as const,
+      reportingGroup: "liabilities" as const,
+    };
+  }
 
   if (
     normalizedName.includes("savings") ||
     normalizedName.includes("money market")
   ) {
-    return "savings";
+    return {
+      accountSubtype: "savings" as const,
+      accountType: "savings" as const,
+      reportingGroup: "cash" as const,
+    };
   }
 
-  return "checking";
+  return {
+    accountSubtype: "checking" as const,
+    accountType: "checking" as const,
+    reportingGroup: "cash" as const,
+  };
 }
 
 function resolveInstitutionName(account: SimplefinAccount) {
@@ -301,7 +325,7 @@ async function finalizeSuccessfulSync(args: {
   const statements: D1PreparedStatement[] = [];
 
   for (const account of args.accountSet.accounts) {
-    const inferredAccountType = inferCashAccountType(account.name);
+    const inferredAccount = inferSimplefinAccountClassification(account.name);
     const institutionName = resolveInstitutionName(account);
     const providerAccountId = providerAccountRowId(
       args.connection.id,
@@ -342,8 +366,8 @@ async function finalizeSuccessfulSync(args: {
           account.id,
           account.name,
           institutionName,
-          inferredAccountType,
-          inferredAccountType,
+          inferredAccount.accountType,
+          inferredAccount.accountSubtype,
           account.currency,
           completionTimeMs,
           completionTimeMs,
@@ -390,13 +414,13 @@ async function finalizeSuccessfulSync(args: {
           providerAccountId,
           account.name,
           institutionName,
-          inferredAccountType,
-          inferredAccountType,
+          inferredAccount.accountType,
+          inferredAccount.accountSubtype,
           account.currency,
           "joint",
           1,
           0,
-          "cash",
+          inferredAccount.reportingGroup,
           balanceMinor,
           completionTimeMs,
           completionTimeMs,
@@ -561,7 +585,10 @@ export async function syncSimplefinConnection(
   args: SyncSimplefinConnectionArgs,
 ): Promise<SyncSimplefinConnectionResult> {
   const now = args.now ?? new Date();
-  const fetchImpl = args.fetchImpl ?? fetch;
+  const fetchImpl: SimplefinFetch =
+    args.fetchImpl ??
+    (((input: RequestInfo | URL, init?: RequestInit) =>
+      globalThis.fetch(input, init)) as SimplefinFetch);
   const connection = await loadProviderConnection(
     args.database,
     args.connectionId,

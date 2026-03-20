@@ -30,6 +30,8 @@ const syncWranglerBin = path.join(
 const host = "127.0.0.1";
 const defaultWebPort = 5173;
 const defaultSyncPort = 8788;
+const shouldSkipSeed =
+  process.argv.includes("--skip-seed") || process.env.VISTA_SKIP_SEED === "1";
 
 type RunningProcess = {
   label: string;
@@ -111,6 +113,11 @@ async function ensureLocalDbReady() {
     logStep(
       `Local D1 already has data (${householdCount} household row, ${accountCount} account row found).`,
     );
+    return;
+  }
+
+  if (shouldSkipSeed) {
+    logStep("Leaving local D1 empty for provider onboarding.");
     return;
   }
 

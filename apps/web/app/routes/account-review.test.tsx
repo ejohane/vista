@@ -220,6 +220,17 @@ describe("account review route", () => {
               name: "Everyday Checking",
               ownershipType: "mine",
             },
+            {
+              accountType: "credit_card",
+              balanceMinor: -12345,
+              displayName: null,
+              id: "acct_credit_card",
+              includeInHouseholdReporting: true,
+              institutionName: "US Bank",
+              isHidden: false,
+              name: "Primary Credit Card",
+              ownershipType: "joint",
+            },
           ],
           householdName: "Vista Household",
           kind: "ready",
@@ -227,7 +238,7 @@ describe("account review route", () => {
           summary: {
             excludedCount: 1,
             hiddenCount: 1,
-            includedCount: 0,
+            includedCount: 1,
           },
           updatedAccountId: "acct_checking",
         }}
@@ -238,6 +249,7 @@ describe("account review route", () => {
     expect(html).toContain("Household Operating");
     expect(html).toContain("Exclude from household reporting");
     expect(html).toContain("Hide on the snapshot");
+    expect(html).toContain("Credit Card");
     expect(html).toContain("Saved changes for Household Operating.");
   });
 });

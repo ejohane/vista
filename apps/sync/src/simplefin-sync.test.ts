@@ -122,6 +122,26 @@ describe("syncSimplefinConnection", () => {
                   },
                 ],
               },
+              {
+                balance: "-123.45",
+                "balance-date": nowEpochSeconds,
+                currency: "USD",
+                id: "credit-card-789",
+                name: "Primary Credit Card",
+                org: {
+                  domain: "usbank.com",
+                  name: "US Bank",
+                  "sfin-url": "https://bridge.simplefin.org/simplefin",
+                },
+                transactions: [
+                  {
+                    amount: "-12.34",
+                    description: "Groceries",
+                    id: "txn-3",
+                    posted: nowEpochSeconds - 3 * 24 * 60 * 60,
+                  },
+                ],
+              },
             ],
             errors: [],
           }),
@@ -152,7 +172,7 @@ describe("syncSimplefinConnection", () => {
           `,
         )
         .get("conn_simplefin_us_bank"),
-    ).toEqual({ count: 2 });
+    ).toEqual({ count: 3 });
     expect(
       sqlite
         .query(
@@ -180,6 +200,15 @@ describe("syncSimplefinConnection", () => {
         reportingGroup: "cash",
       },
       {
+        accountType: "credit_card",
+        balanceMinor: -12345,
+        id: "acct:simplefin:conn_simplefin_us_bank:credit-card-789",
+        name: "Primary Credit Card",
+        providerAccountId:
+          "provacct:simplefin:conn_simplefin_us_bank:credit-card-789",
+        reportingGroup: "liabilities",
+      },
+      {
         accountType: "savings",
         balanceMinor: 250000,
         id: "acct:simplefin:conn_simplefin_us_bank:savings-456",
@@ -199,7 +228,7 @@ describe("syncSimplefinConnection", () => {
           `,
         )
         .get(result.runId),
-    ).toEqual({ count: 2 });
+    ).toEqual({ count: 3 });
     expect(
       sqlite
         .query(
@@ -229,6 +258,13 @@ describe("syncSimplefinConnection", () => {
         categoryRaw: null,
         direction: "credit",
         providerTransactionId: "txn-2",
+      },
+      {
+        accountId: "acct:simplefin:conn_simplefin_us_bank:credit-card-789",
+        amountMinor: -1234,
+        categoryRaw: null,
+        direction: "debit",
+        providerTransactionId: "txn-3",
       },
     ]);
     expect(
@@ -263,7 +299,7 @@ describe("syncSimplefinConnection", () => {
     ).toEqual({
       provider: "simplefin",
       providerConnectionId: "conn_simplefin_us_bank",
-      recordsChanged: 6,
+      recordsChanged: 9,
       status: "succeeded",
     });
   });
