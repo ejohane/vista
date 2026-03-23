@@ -320,6 +320,81 @@ describe("getDashboardSnapshot", () => {
     );
   });
 
+  test("treats credit-card balances as liabilities instead of cash", async () => {
+    const { db, sqlite } = createTestDb();
+
+    sqlite
+      .query(
+        `
+          insert into accounts (
+            id,
+            household_id,
+            name,
+            institution_name,
+            account_type,
+            reporting_group,
+            balance_minor,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "acct_credit_card",
+        "household_demo",
+        "Primary Credit Card",
+        "US Bank",
+        "credit_card",
+        "liabilities",
+        -12345,
+        createdAt.getTime(),
+        secondCompletedAt.getTime(),
+      );
+
+    insertSucceededRun(sqlite, {
+      balances: {
+        acct_brokerage: 16450320,
+        acct_checking: 1284500,
+        acct_credit_card: -12345,
+        acct_retirement: 24311890,
+        acct_savings: 3527600,
+      },
+      completedAt: secondCompletedAt,
+      runId: "sync_seed_2026_03_16",
+      startedAt: new Date("2026-03-16T18:25:00.000Z"),
+    });
+
+    const snapshot = await getDashboardSnapshot(db);
+
+    expect(snapshot?.totals).toEqual({
+      cashMinor: 4812100,
+      investmentsMinor: 40762210,
+      netWorthMinor: 45561965,
+    });
+    expect(snapshot?.accountTypeGroups.map((group) => group.key)).toEqual([
+      "checking",
+      "savings",
+      "credit_card",
+      "brokerage",
+      "retirement",
+    ]);
+    expect(snapshot?.accountTypeGroups[2]).toEqual({
+      accounts: [
+        {
+          accountType: "credit_card",
+          balanceMinor: -12345,
+          id: "acct_credit_card",
+          institutionName: "US Bank",
+          name: "Primary Credit Card",
+        },
+      ],
+      key: "credit_card",
+      label: "Credit Card",
+      totalMinor: -12345,
+    });
+  });
+
   test("computes deltas for totals, account groups, and the top changed accounts", async () => {
     const { db, sqlite } = createTestDb();
 

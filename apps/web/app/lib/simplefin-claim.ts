@@ -125,7 +125,10 @@ export async function claimSimplefinSetupToken(
   args: ClaimSimplefinSetupTokenArgs,
 ): Promise<ClaimedSimplefinConnection> {
   const now = args.now ?? new Date();
-  const fetchImpl = args.fetchImpl ?? fetch;
+  const fetchImpl: typeof fetch =
+    args.fetchImpl ??
+    (((input: RequestInfo | URL, init?: RequestInit) =>
+      globalThis.fetch(input, init)) as typeof fetch);
   const claimUrl = decodeSetupToken(args.setupToken);
   const claimResponse = await fetchImpl(claimUrl.toString(), {
     method: "POST",

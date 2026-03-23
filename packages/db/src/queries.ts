@@ -6,6 +6,7 @@ import { accounts, balanceSnapshots, households, syncRuns } from "./schema";
 const accountTypeLabels = {
   brokerage: "Brokerage",
   checking: "Checking",
+  credit_card: "Credit Card",
   retirement: "Retirement",
   savings: "Savings",
 } as const;
@@ -13,6 +14,7 @@ const accountTypeLabels = {
 const accountTypeReportingGroups = {
   brokerage: "investments",
   checking: "cash",
+  credit_card: "liabilities",
   retirement: "investments",
   savings: "cash",
 } as const;
@@ -20,7 +22,7 @@ const accountTypeReportingGroups = {
 const accountTypeKeys = Object.keys(accountTypeLabels) as Array<
   keyof typeof accountTypeLabels
 >;
-const reportingGroupOrder = ["cash", "investments"] as const;
+const reportingGroupOrder = ["cash", "liabilities", "investments"] as const;
 
 type DashboardDb = Pick<VistaDb, "query" | "select">;
 type ReportingGroup = (typeof reportingGroupOrder)[number];
@@ -168,6 +170,7 @@ function buildAccountTypeGroups(accountsForGroups: HouseholdAccountSnapshot[]) {
       {
         brokerage: { accounts: [], totalMinor: 0 },
         checking: { accounts: [], totalMinor: 0 },
+        credit_card: { accounts: [], totalMinor: 0 },
         retirement: { accounts: [], totalMinor: 0 },
         savings: { accounts: [], totalMinor: 0 },
       },
@@ -207,6 +210,7 @@ function createAccountTypeTotals() {
   return {
     brokerage: 0,
     checking: 0,
+    credit_card: 0,
     retirement: 0,
     savings: 0,
   } satisfies Record<keyof typeof accountTypeLabels, number>;
