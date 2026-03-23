@@ -482,3 +482,124 @@ export async function getDashboardSnapshot(
     totals: buildTotals(latestReportingAccounts),
   };
 }
+
+export type NetWorthHistoryPoint = {
+  cashMinor: number;
+  completedAt: string;
+  investmentsMinor: number;
+  liabilitiesMinor: number;
+  netWorthMinor: number;
+};
+
+export async function getNetWorthHistory(
+  db: DashboardDb,
+  householdId?: string,
+  limit = 30,
+): Promise<NetWorthHistoryPoint[]> {
+  const household = householdId
+    ? await db.query.households.findFirst({
+        where: eq(households.id, householdId),
+      })
+    : await db.query.households.findFirst();
+
+  if (!household) {
+    return [];
+  }
+
+  const resolvedHouseholdId = household.id;
+
+  const runs = await db
+    .select({
+      completedAt: syncRuns.completedAt,
+      id: syncRuns.id,
+    })
+    .from(syncRuns)
+    .where(
+      and(
+        eq(syncRuns.householdId, resolvedHouseholdId),
+        eq(syncRuns.status, "succeeded"),
+      ),
+    )
+    .orderBy(desc(syncRuns.completedAt), desc(syncRuns.startedAt))
+    .limit(limit);
+
+  const validRuns = runs.filter(
+    (run): run is { completedAt: Date; id: string } =>
+      run.completedAt instanceof Date,
+  );
+
+  if (!validRuns.length) {
+    return [];
+  }
+
+  const runIds = validRuns.map((run) => run.id);
+
+  const snapshotRows = await db
+    .select({
+      accountId: accounts.id,
+      balanceMinor: balanceSnapshots.balanceMinor,
+      includeInHouseholdReporting: accounts.includeInHouseholdReporting,
+      reportingGroup: accounts.reportingGroup,
+      sourceSyncRunId: balanceSnapshots.sourceSyncRunId,
+    })
+    .from(balanceSnapshots)
+    .innerJoin(
+      accounts,
+      and(
+        eq(balanceSnapshots.accountId, accounts.id),
+        eq(accounts.householdId, resolvedHouseholdId),
+      ),
+    )
+    .where(inArray(balanceSnapshots.sourceSyncRunId, runIds));
+
+  const pointsByRun = new Map<
+    string,
+    {
+      cashMinor: number;
+      investmentsMinor: number;
+      liabilitiesMinor: number;
+      netWorthMinor: number;
+    }
+  >();
+
+  for (const row of snapshotRows) {
+    if (!row.includeInHouseholdReporting) continue;
+
+    let point = pointsByRun.get(row.sourceSyncRunId);
+    if (!point) {
+      point = {
+        cashMinor: 0,
+        investmentsMinor: 0,
+        liabilitiesMinor: 0,
+        netWorthMinor: 0,
+      };
+      pointsByRun.set(row.sourceSyncRunId, point);
+    }
+
+    point.netWorthMinor += row.balanceMinor;
+
+    if (row.reportingGroup === "cash") {
+      point.cashMinor += row.balanceMinor;
+    } else if (row.reportingGroup === "investments") {
+      point.investmentsMinor += row.balanceMinor;
+    } else if (row.reportingGroup === "liabilities") {
+      point.liabilitiesMinor += row.balanceMinor;
+    }
+  }
+
+  return validRuns
+    .filter((run) => pointsByRun.has(run.id))
+    .map((run) => {
+      const point = pointsByRun.get(run.id);
+      if (!point) {
+        return null;
+      }
+
+      return {
+        ...point,
+        completedAt: run.completedAt.toISOString(),
+      };
+    })
+    .filter((point) => point !== null)
+    .reverse();
+}
