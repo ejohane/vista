@@ -1,7 +1,17 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 
 import type { VistaDb } from "./client";
-import { accounts, balanceSnapshots, households, syncRuns } from "./schema";
+import {
+  accounts,
+  balanceSnapshots,
+  households,
+  type ProviderConnectionStatus,
+  type ProviderType,
+  providerConnections,
+  providerTypes,
+  type SyncRunStatus,
+  syncRuns,
+} from "./schema";
 
 const accountTypeLabels = {
   brokerage: "Brokerage",
@@ -23,6 +33,16 @@ const accountTypeKeys = Object.keys(accountTypeLabels) as Array<
   keyof typeof accountTypeLabels
 >;
 const reportingGroupOrder = ["cash", "liabilities", "investments"] as const;
+const homepageReportingGroupLabels = {
+  cash: "Cash",
+  investments: "Investments",
+  liabilities: "Liabilities",
+} as const;
+const homepageReportingGroupOrder = [
+  "cash",
+  "investments",
+  "liabilities",
+] as const;
 
 type DashboardDb = Pick<VistaDb, "query" | "select">;
 type ReportingGroup = (typeof reportingGroupOrder)[number];
@@ -40,6 +60,12 @@ type HouseholdAccountSnapshot = {
 type SyncRunSummary = {
   completedAt: Date | null;
   id: string;
+};
+
+type ResolvedHousehold = {
+  id: string;
+  lastSyncedAt: Date;
+  name: string;
 };
 
 export type DashboardSnapshot = {
@@ -86,6 +112,51 @@ export type DashboardSnapshot = {
     netWorthMinor: number;
   };
 };
+
+export type HomepageSnapshot = {
+  changeSummary: null | {
+    netWorthDeltaMinor: number;
+  };
+  connectionStates: Array<{
+    configuredConnectionCount: number;
+    lastSuccessfulSyncAt: Date | null;
+    latestRunAt: Date | null;
+    latestRunStatus: "never" | SyncRunStatus;
+    provider: ProviderType;
+    status: ProviderConnectionStatus | "not_connected";
+  }>;
+  hasSuccessfulSync: boolean;
+  history: NetWorthHistoryPoint[];
+  householdName: string;
+  lastSyncedAt: Date;
+  reportingGroups: Array<{
+    accounts: Array<{
+      balanceMinor: number;
+      id: string;
+      institutionName: string;
+      name: string;
+    }>;
+    key: ReportingGroup;
+    label: (typeof homepageReportingGroupLabels)[ReportingGroup];
+    totalMinor: number;
+  }>;
+  totals: {
+    cashMinor: number;
+    investmentsMinor: number;
+    netWorthMinor: number;
+  };
+};
+
+async function resolveHousehold(
+  db: DashboardDb,
+  householdId?: string,
+): Promise<ResolvedHousehold | null> {
+  return householdId
+    ? ((await db.query.households.findFirst({
+        where: eq(households.id, householdId),
+      })) ?? null)
+    : ((await db.query.households.findFirst()) ?? null);
+}
 
 function assertValidAccount(
   account: HouseholdAccountSnapshot,
@@ -206,6 +277,49 @@ function buildAccountTypeGroups(accountsForGroups: HouseholdAccountSnapshot[]) {
     }));
 }
 
+function buildHomepageReportingGroups(
+  accountTypeGroups: DashboardSnapshot["accountTypeGroups"],
+): HomepageSnapshot["reportingGroups"] {
+  const grouped = new Map<
+    ReportingGroup,
+    HomepageSnapshot["reportingGroups"][number]
+  >();
+
+  for (const group of accountTypeGroups) {
+    const reportingGroup = accountTypeReportingGroups[group.key];
+    const accounts = group.accounts.map(
+      ({ accountType: _, ...account }) => account,
+    );
+    const existing = grouped.get(reportingGroup);
+
+    if (existing) {
+      existing.accounts.push(...accounts);
+      existing.totalMinor += group.totalMinor;
+      continue;
+    }
+
+    grouped.set(reportingGroup, {
+      accounts,
+      key: reportingGroup,
+      label: homepageReportingGroupLabels[reportingGroup],
+      totalMinor: group.totalMinor,
+    });
+  }
+
+  return homepageReportingGroupOrder
+    .map((key) => grouped.get(key))
+    .filter(
+      (group): group is HomepageSnapshot["reportingGroups"][number] =>
+        group !== undefined && group.accounts.length > 0,
+    )
+    .map((group) => ({
+      ...group,
+      accounts: [...group.accounts].sort(
+        (left, right) => right.balanceMinor - left.balanceMinor,
+      ),
+    }));
+}
+
 function createAccountTypeTotals() {
   return {
     brokerage: 0,
@@ -246,6 +360,73 @@ async function loadHouseholdAccounts(
   });
 
   return normalizedRows;
+}
+
+async function loadHomepageConnectionStates(
+  db: DashboardDb,
+  householdId: string,
+): Promise<HomepageSnapshot["connectionStates"]> {
+  const [connectionRows, runRows] = await Promise.all([
+    db
+      .select({
+        accessSecret: providerConnections.accessSecret,
+        accessUrl: providerConnections.accessUrl,
+        provider: providerConnections.provider,
+        status: providerConnections.status,
+      })
+      .from(providerConnections)
+      .where(eq(providerConnections.householdId, householdId)),
+    db
+      .select({
+        completedAt: syncRuns.completedAt,
+        provider: syncRuns.provider,
+        startedAt: syncRuns.startedAt,
+        status: syncRuns.status,
+      })
+      .from(syncRuns)
+      .where(eq(syncRuns.householdId, householdId))
+      .orderBy(desc(syncRuns.completedAt), desc(syncRuns.startedAt)),
+  ]);
+
+  return providerTypes.map((provider) => {
+    const providerConnectionsForProvider = connectionRows.filter(
+      (connection) => connection.provider === provider,
+    );
+    const configuredConnectionCount = providerConnectionsForProvider.filter(
+      (connection) =>
+        connection.status === "active" &&
+        (provider === "simplefin"
+          ? Boolean(connection.accessUrl)
+          : Boolean(connection.accessSecret)),
+    ).length;
+    const status: HomepageSnapshot["connectionStates"][number]["status"] =
+      configuredConnectionCount > 0
+        ? "active"
+        : providerConnectionsForProvider.some(
+              (connection) => connection.status === "error",
+            )
+          ? "error"
+          : providerConnectionsForProvider.some(
+                (connection) => connection.status === "disconnected",
+              )
+            ? "disconnected"
+            : "not_connected";
+    const runsForProvider = runRows.filter((run) => run.provider === provider);
+    const latestRun = runsForProvider[0];
+    const lastSuccessfulRun = runsForProvider.find(
+      (run): run is typeof run & { completedAt: Date } =>
+        run.status === "succeeded" && run.completedAt instanceof Date,
+    );
+
+    return {
+      configuredConnectionCount,
+      lastSuccessfulSyncAt: lastSuccessfulRun?.completedAt ?? null,
+      latestRunAt: latestRun?.completedAt ?? latestRun?.startedAt ?? null,
+      latestRunStatus: latestRun?.status ?? "never",
+      provider,
+      status,
+    };
+  });
 }
 
 function buildChangeSummary(
@@ -372,11 +553,7 @@ export async function getDashboardSnapshot(
   db: DashboardDb,
   householdId?: string,
 ): Promise<DashboardSnapshot | null> {
-  const household = householdId
-    ? await db.query.households.findFirst({
-        where: eq(households.id, householdId),
-      })
-    : await db.query.households.findFirst();
+  const household = await resolveHousehold(db, householdId);
 
   if (!household) {
     return null;
@@ -496,11 +673,7 @@ export async function getNetWorthHistory(
   householdId?: string,
   limit = 30,
 ): Promise<NetWorthHistoryPoint[]> {
-  const household = householdId
-    ? await db.query.households.findFirst({
-        where: eq(households.id, householdId),
-      })
-    : await db.query.households.findFirst();
+  const household = await resolveHousehold(db, householdId);
 
   if (!household) {
     return [];
@@ -602,4 +775,41 @@ export async function getNetWorthHistory(
     })
     .filter((point) => point !== null)
     .reverse();
+}
+
+export async function getHomepageSnapshot(
+  db: DashboardDb,
+  householdId?: string,
+): Promise<HomepageSnapshot | null> {
+  const household = await resolveHousehold(db, householdId);
+
+  if (!household) {
+    return null;
+  }
+
+  const resolvedHouseholdId = household.id;
+  const [dashboard, history, connectionStates] = await Promise.all([
+    getDashboardSnapshot(db, resolvedHouseholdId),
+    getNetWorthHistory(db, resolvedHouseholdId),
+    loadHomepageConnectionStates(db, resolvedHouseholdId),
+  ]);
+
+  if (!dashboard) {
+    return null;
+  }
+
+  return {
+    changeSummary: dashboard.changeSummary
+      ? {
+          netWorthDeltaMinor: dashboard.changeSummary.netWorthDeltaMinor,
+        }
+      : null,
+    connectionStates,
+    hasSuccessfulSync: dashboard.hasSuccessfulSync,
+    history,
+    householdName: dashboard.householdName,
+    lastSyncedAt: dashboard.lastSyncedAt,
+    reportingGroups: buildHomepageReportingGroups(dashboard.accountTypeGroups),
+    totals: dashboard.totals,
+  };
 }

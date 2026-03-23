@@ -9,9 +9,8 @@ import {
   WalletIcon,
 } from "@phosphor-icons/react";
 import {
-  getDashboardSnapshot,
   getDb,
-  getNetWorthHistory,
+  getHomepageSnapshot,
   type NetWorthHistoryPoint,
 } from "@vista/db";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
@@ -23,15 +22,14 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import { formatCompactUsd, formatSignedUsd, formatUsd } from "@/lib/format";
+import {
+  formatCompactUsd,
+  formatSignedUsd,
+  formatUpdatedAt,
+  formatUsd,
+} from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Route } from "./+types/home";
-
-const reportingGroupLabels: Record<string, string> = {
-  cash: "Cash",
-  investments: "Investments",
-  liabilities: "Liabilities",
-};
 
 const reportingGroupIcons: Record<
   string,
@@ -55,6 +53,28 @@ type ReportingGroupForDisplay = {
   label: string;
   totalMinor: number;
 };
+
+type ConnectionStateForDisplay = {
+  configuredConnectionCount: number;
+  lastSuccessfulSyncAt: null | string;
+  latestRunAt: null | string;
+  latestRunStatus: "failed" | "never" | "running" | "succeeded";
+  provider: "simplefin" | "snaptrade";
+  status: "active" | "disconnected" | "error" | "not_connected";
+};
+
+const providerMeta = {
+  simplefin: {
+    eyebrow: "Banking",
+    href: "/connect/simplefin",
+    name: "SimpleFIN",
+  },
+  snaptrade: {
+    eyebrow: "Investing",
+    href: "/connect/snaptrade",
+    name: "SnapTrade",
+  },
+} as const;
 
 function formatChartDate(iso: string) {
   const d = new Date(iso);
@@ -251,6 +271,120 @@ function ReportingGroupSection({ group }: { group: ReportingGroupForDisplay }) {
   );
 }
 
+function describeConnectionState(state: ConnectionStateForDisplay) {
+  const provider = providerMeta[state.provider];
+  const configuredLabel =
+    state.configuredConnectionCount === 1
+      ? "1 live connection"
+      : `${state.configuredConnectionCount} live connections`;
+
+  if (state.status === "active") {
+    if (state.latestRunStatus === "running" && state.latestRunAt) {
+      return {
+        actionLabel: `Open ${provider.name}`,
+        detail: `${configuredLabel}. Sync started ${formatUpdatedAt(state.latestRunAt)}.`,
+        tone: "amber" as const,
+        toneLabel: "Syncing",
+      };
+    }
+
+    if (state.latestRunStatus === "failed" && state.latestRunAt) {
+      return {
+        actionLabel: `Reconnect ${provider.name}`,
+        detail: `${configuredLabel}. Latest sync failed ${formatUpdatedAt(state.latestRunAt)}.`,
+        tone: "rose" as const,
+        toneLabel: "Needs attention",
+      };
+    }
+
+    if (state.lastSuccessfulSyncAt) {
+      return {
+        actionLabel: `Open ${provider.name}`,
+        detail: `${configuredLabel}. Last sync ${formatUpdatedAt(state.lastSuccessfulSyncAt)}.`,
+        tone: "emerald" as const,
+        toneLabel: "Connected",
+      };
+    }
+
+    return {
+      actionLabel: `Open ${provider.name}`,
+      detail: `${configuredLabel}. Ready for the first import into Vista.`,
+      tone: "emerald" as const,
+      toneLabel: "Connected",
+    };
+  }
+
+  if (state.status === "error") {
+    return {
+      actionLabel: `Reconnect ${provider.name}`,
+      detail: `The ${provider.name} connection needs to be re-authorized before data can flow again.`,
+      tone: "rose" as const,
+      toneLabel: "Needs attention",
+    };
+  }
+
+  if (state.status === "disconnected") {
+    return {
+      actionLabel: `Reconnect ${provider.name}`,
+      detail: `Reconnect ${provider.name} to resume imports on the homepage.`,
+      tone: "amber" as const,
+      toneLabel: "Disconnected",
+    };
+  }
+
+  return {
+    actionLabel: `Connect ${provider.name}`,
+    detail: `Connect ${provider.name} to bring live ${provider.eyebrow.toLowerCase()} data into Vista.`,
+    tone: "slate" as const,
+    toneLabel: "Not connected",
+  };
+}
+
+function ConnectionCard({ state }: { state: ConnectionStateForDisplay }) {
+  const provider = providerMeta[state.provider];
+  const presentation = describeConnectionState(state);
+
+  return (
+    <div className="rounded-2xl border border-border/60 bg-card/80 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+            {provider.eyebrow}
+          </p>
+          <h3 className="text-base font-semibold tracking-tight">
+            {provider.name}
+          </h3>
+        </div>
+        <span
+          className={cn(
+            "inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-widest",
+            presentation.tone === "emerald" &&
+              "bg-emerald-500/10 text-emerald-700",
+            presentation.tone === "amber" && "bg-amber-500/10 text-amber-700",
+            presentation.tone === "rose" && "bg-rose-500/10 text-rose-700",
+            presentation.tone === "slate" && "bg-muted text-muted-foreground",
+          )}
+        >
+          {presentation.toneLabel}
+        </span>
+      </div>
+      <p className="mt-3 text-sm leading-6 text-muted-foreground">
+        {presentation.detail}
+      </p>
+      <a
+        href={provider.href}
+        className={cn(
+          buttonVariants({ size: "sm", variant: "outline" }),
+          "mt-4 h-8 gap-1.5",
+        )}
+      >
+        {presentation.actionLabel}
+        <ArrowUpRightIcon className="size-3" />
+      </a>
+    </div>
+  );
+}
+
 export function meta(_: Route.MetaArgs) {
   return [
     { title: "Vista" },
@@ -262,11 +396,7 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ context }: Route.LoaderArgs) {
-  const db = getDb(context.cloudflare.env.DB);
-  const [snapshot, history] = await Promise.all([
-    getDashboardSnapshot(db),
-    getNetWorthHistory(db),
-  ]);
+  const snapshot = await getHomepageSnapshot(getDb(context.cloudflare.env.DB));
 
   if (!snapshot) {
     return {
@@ -275,58 +405,19 @@ export async function loader({ context }: Route.LoaderArgs) {
     };
   }
 
-  // Collapse accountTypeGroups into reportingGroups for a cleaner view
-  const reportingGroupMap = new Map<string, ReportingGroupForDisplay>();
-  const groupOrder = ["cash", "investments", "liabilities"];
-
-  for (const atg of snapshot.accountTypeGroups) {
-    const rg =
-      atg.key === "checking" || atg.key === "savings"
-        ? "cash"
-        : atg.key === "credit_card"
-          ? "liabilities"
-          : "investments";
-
-    const existing = reportingGroupMap.get(rg);
-    if (existing) {
-      existing.accounts.push(...atg.accounts);
-      existing.totalMinor += atg.totalMinor;
-    } else {
-      reportingGroupMap.set(rg, {
-        accounts: [...atg.accounts],
-        key: rg,
-        label: reportingGroupLabels[rg] ?? rg,
-        totalMinor: atg.totalMinor,
-      });
-    }
-  }
-
-  const reportingGroups = groupOrder
-    .map((key) => reportingGroupMap.get(key))
-    .filter(
-      (g): g is ReportingGroupForDisplay =>
-        g !== undefined && g.accounts.length > 0,
-    );
-
-  // Sort accounts within each group by balance descending
-  for (const group of reportingGroups) {
-    group.accounts.sort((a, b) => b.balanceMinor - a.balanceMinor);
-  }
-
   return {
     kind: "ready" as const,
-    changeSummary: snapshot.changeSummary
-      ? {
-          netWorthDeltaMinor: snapshot.changeSummary.netWorthDeltaMinor,
-        }
-      : null,
-    history: history.map((point) => ({
-      ...point,
-      completedAt: point.completedAt,
+    changeSummary: snapshot.changeSummary,
+    connectionStates: snapshot.connectionStates.map((state) => ({
+      ...state,
+      lastSuccessfulSyncAt: state.lastSuccessfulSyncAt?.toISOString() ?? null,
+      latestRunAt: state.latestRunAt?.toISOString() ?? null,
     })),
+    hasSuccessfulSync: snapshot.hasSuccessfulSync,
+    history: snapshot.history,
     householdName: snapshot.householdName,
     lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
-    reportingGroups,
+    reportingGroups: snapshot.reportingGroups,
     totals: snapshot.totals,
   };
 }
@@ -371,8 +462,16 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     );
   }
 
-  const { totals, changeSummary, history, reportingGroups, lastSyncedAt } =
-    loaderData;
+  const {
+    totals,
+    changeSummary,
+    connectionStates,
+    hasSuccessfulSync,
+    history,
+    householdName,
+    reportingGroups,
+    lastSyncedAt,
+  } = loaderData;
 
   return (
     <div className="mx-auto min-h-svh w-full max-w-lg px-5 pb-24 pt-safe-top lg:max-w-2xl">
@@ -406,6 +505,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       {/* Net worth hero */}
       <section className="space-y-1 pb-6">
         <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+          {householdName}
+        </p>
+        <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
           Net Worth
         </p>
         <div className="flex items-baseline gap-3">
@@ -417,7 +519,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           )}
         </div>
         <p className="text-xs text-muted-foreground">
-          Updated {formatChartDate(lastSyncedAt)}
+          {hasSuccessfulSync
+            ? `Updated ${formatChartDate(lastSyncedAt)}`
+            : "Using current account balances while the first sync comes online"}
         </p>
       </section>
 
@@ -452,6 +556,13 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             {reportingGroups.reduce((s, g) => s + g.accounts.length, 0)}
           </p>
         </div>
+      </section>
+
+      {/* Connection state */}
+      <section className="grid gap-3 pb-8 sm:grid-cols-2">
+        {connectionStates.map((state) => (
+          <ConnectionCard key={state.provider} state={state} />
+        ))}
       </section>
 
       {/* Accounts by reporting group */}
