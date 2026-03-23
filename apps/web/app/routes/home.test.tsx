@@ -6,64 +6,59 @@ import Home from "./home";
 type HomeProps = Parameters<typeof Home>[0];
 
 describe("Home route", () => {
-  test("renders a populated change summary when comparison data exists", () => {
+  test("renders the redesigned product-first dashboard", () => {
     const props = {
       loaderData: {
-        accountTypeGroups: [
+        changeSummary: {
+          netWorthDeltaMinor: 374310,
+        },
+        history: [
+          {
+            cashMinor: 4700000,
+            completedAt: "2026-03-14T18:30:00.000Z",
+            investmentsMinor: 40000000,
+            liabilitiesMinor: -1200000,
+            netWorthMinor: 43500000,
+          },
+          {
+            cashMinor: 4812100,
+            completedAt: "2026-03-16T18:30:00.000Z",
+            investmentsMinor: 40762210,
+            liabilitiesMinor: -1000000,
+            netWorthMinor: 45574310,
+          },
+        ],
+        householdName: "Vista Household",
+        kind: "ready",
+        lastSyncedAt: "2026-03-16T18:30:00.000Z",
+        reportingGroups: [
           {
             accounts: [
               {
-                accountType: "checking",
                 balanceMinor: 1284500,
                 id: "acct_checking",
                 institutionName: "US Bank",
                 name: "Everyday Checking",
               },
             ],
-            key: "checking",
-            label: "Checking",
-            totalMinor: 1284500,
+            key: "cash",
+            label: "Cash",
+            totalMinor: 4812100,
+          },
+          {
+            accounts: [
+              {
+                balanceMinor: 16450320,
+                id: "acct_brokerage",
+                institutionName: "Vanguard",
+                name: "Taxable Brokerage",
+              },
+            ],
+            key: "investments",
+            label: "Investments",
+            totalMinor: 40762210,
           },
         ],
-        changeSummary: {
-          cashDeltaMinor: 72100,
-          changedAccounts: [
-            {
-              accountType: "brokerage",
-              deltaMinor: 270320,
-              id: "acct_brokerage",
-              institutionName: "Vanguard",
-              latestBalanceMinor: 16450320,
-              name: "Taxable Brokerage",
-              previousBalanceMinor: 16180000,
-            },
-            {
-              accountType: "checking",
-              deltaMinor: 44500,
-              id: "acct_checking",
-              institutionName: "US Bank",
-              latestBalanceMinor: 1284500,
-              name: "Everyday Checking",
-              previousBalanceMinor: 1240000,
-            },
-          ],
-          changedGroups: [
-            {
-              deltaMinor: 270320,
-              key: "brokerage",
-              label: "Brokerage",
-              latestTotalMinor: 16450320,
-              previousTotalMinor: 16180000,
-            },
-          ],
-          comparedToCompletedAt: "2026-03-15T18:30:00.000Z",
-          investmentsDeltaMinor: 302210,
-          netWorthDeltaMinor: 374310,
-        },
-        hasSuccessfulSync: true,
-        householdName: "Vista Household",
-        kind: "ready",
-        lastSyncedAt: "2026-03-16T18:30:00.000Z",
         totals: {
           cashMinor: 4812100,
           investmentsMinor: 40762210,
@@ -76,27 +71,35 @@ describe("Home route", () => {
 
     const html = renderToStaticMarkup(<Home {...props} />);
 
-    expect(html).toContain("Compact change summary");
-    expect(html).toContain(
-      "Brokerage drove the biggest move higher compared with Mar 15, 2026 at 6:30 PM UTC, led by Taxable Brokerage.",
-    );
-    expect(html).toContain("Compared to Mar 15, 2026 at 6:30 PM UTC");
+    expect(html).toContain("Net Worth");
+    expect(html).toContain("$455.7K");
     expect(html).toContain("+$3,743.10");
-    expect(html).toContain("+$721.00");
-    expect(html).toContain("Largest account moves");
+    expect(html).toContain("Portfolio");
+    expect(html).toContain("Cash");
+    expect(html).toContain("Investments");
+    expect(html).toContain("Everyday Checking");
+    expect(html).toContain("Taxable Brokerage");
     expect(html).toContain("/accounts/review");
     expect(html).toContain("/portfolio");
   });
 
-  test("renders the explicit empty state when only one successful run exists", () => {
+  test("renders chart pending copy when history has fewer than two points", () => {
     const props = {
       loaderData: {
-        accountTypeGroups: [],
         changeSummary: null,
-        hasSuccessfulSync: true,
+        history: [
+          {
+            cashMinor: 4982340,
+            completedAt: "2026-03-17T18:30:00.000Z",
+            investmentsMinor: 41060510,
+            liabilitiesMinor: -482000,
+            netWorthMinor: 46042850,
+          },
+        ],
         householdName: "Vista Household",
         kind: "ready",
         lastSyncedAt: "2026-03-17T18:30:00.000Z",
+        reportingGroups: [],
         totals: {
           cashMinor: 4982340,
           investmentsMinor: 41060510,
@@ -109,21 +112,39 @@ describe("Home route", () => {
 
     const html = renderToStaticMarkup(<Home {...props} />);
 
-    expect(html).toContain("Compact change summary");
-    expect(html).toContain("Waiting for another sync");
-    expect(html).toContain("Change summary available after the next sync");
-    expect(html).not.toContain("Compared to Mar");
+    expect(html).toContain("Chart available after multiple syncs");
+    expect(html).not.toContain("+$");
   });
 
-  test("renders first-sync copy when balances exist without successful sync history", () => {
+  test("renders compact stats and account count from grouped accounts", () => {
     const props = {
       loaderData: {
-        accountTypeGroups: [],
         changeSummary: null,
-        hasSuccessfulSync: false,
+        history: [],
         householdName: "Vista Household",
         kind: "ready",
         lastSyncedAt: "2026-03-15T18:30:00.000Z",
+        reportingGroups: [
+          {
+            accounts: [
+              {
+                balanceMinor: 187,
+                id: "acct1",
+                institutionName: "Demo Bank",
+                name: "Cash Pocket",
+              },
+              {
+                balanceMinor: 143,
+                id: "acct2",
+                institutionName: "Demo Broker",
+                name: "Starter Fund",
+              },
+            ],
+            key: "cash",
+            label: "Cash",
+            totalMinor: 330,
+          },
+        ],
         totals: {
           cashMinor: 187,
           investmentsMinor: 143,
@@ -136,38 +157,17 @@ describe("Home route", () => {
 
     const html = renderToStaticMarkup(<Home {...props} />);
 
-    expect(html).toContain("Waiting for first sync");
-    expect(html).toContain(
-      "Change summary available after the first successful sync",
-    );
-    expect(html).toContain(
-      "Loaded current balances while waiting for the first successful sync.",
-    );
-    expect(html).toContain("/connect/simplefin");
-    expect(html).toContain("/connect/snaptrade");
+    expect(html).toContain("Accounts");
+    expect(html).toContain(">2<");
+    expect(html).toContain("Cash Pocket");
+    expect(html).toContain("Starter Fund");
   });
 
-  test("renders explicit flat-state copy when comparison deltas are zero", () => {
+  test("renders the seeded empty state when no household snapshot exists", () => {
     const props = {
       loaderData: {
-        accountTypeGroups: [],
-        changeSummary: {
-          cashDeltaMinor: 0,
-          changedAccounts: [],
-          changedGroups: [],
-          comparedToCompletedAt: "2026-03-15T18:30:00.000Z",
-          investmentsDeltaMinor: 0,
-          netWorthDeltaMinor: 0,
-        },
-        hasSuccessfulSync: true,
-        householdName: "Vista Household",
-        kind: "ready",
-        lastSyncedAt: "2026-03-16T18:30:00.000Z",
-        totals: {
-          cashMinor: 4812100,
-          investmentsMinor: 40762210,
-          netWorthMinor: 45574310,
-        },
+        kind: "empty",
+        nextStepCommand: "bun run db:seed:local",
       },
       matches: [],
       params: {},
@@ -175,14 +175,9 @@ describe("Home route", () => {
 
     const html = renderToStaticMarkup(<Home {...props} />);
 
-    expect(html).toContain(
-      "Compared with Mar 15, 2026 at 6:30 PM UTC, balances were effectively flat across the tracked account groups.",
-    );
-    expect(html).toContain(
-      "No account groups moved between the latest two snapshots.",
-    );
-    expect(html).toContain(
-      "No individual accounts moved between the latest two snapshots.",
-    );
+    expect(html).toContain("Welcome to Vista");
+    expect(html).toContain("bun run db:seed:local");
+    expect(html).toContain("/connect/simplefin");
+    expect(html).toContain("/connect/snaptrade");
   });
 });
