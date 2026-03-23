@@ -12,6 +12,25 @@ describe("Home route", () => {
         changeSummary: {
           netWorthDeltaMinor: 374310,
         },
+        connectionStates: [
+          {
+            configuredConnectionCount: 1,
+            lastSuccessfulSyncAt: "2026-03-16T18:30:00.000Z",
+            latestRunAt: "2026-03-16T18:30:00.000Z",
+            latestRunStatus: "succeeded",
+            provider: "simplefin",
+            status: "active",
+          },
+          {
+            configuredConnectionCount: 0,
+            lastSuccessfulSyncAt: null,
+            latestRunAt: null,
+            latestRunStatus: "never",
+            provider: "snaptrade",
+            status: "not_connected",
+          },
+        ],
+        hasSuccessfulSync: true,
         history: [
           {
             cashMinor: 4700000,
@@ -79,14 +98,39 @@ describe("Home route", () => {
     expect(html).toContain("Investments");
     expect(html).toContain("Everyday Checking");
     expect(html).toContain("Taxable Brokerage");
+    expect(html).toContain("SimpleFIN");
+    expect(html).toContain("SnapTrade");
+    expect(html).toContain("Connected");
+    expect(html).toContain("Not connected");
     expect(html).toContain("/accounts/review");
     expect(html).toContain("/portfolio");
+    expect(html).toContain("/connect/simplefin");
+    expect(html).toContain("/connect/snaptrade");
   });
 
   test("renders chart pending copy when history has fewer than two points", () => {
     const props = {
       loaderData: {
         changeSummary: null,
+        connectionStates: [
+          {
+            configuredConnectionCount: 1,
+            lastSuccessfulSyncAt: "2026-03-17T18:30:00.000Z",
+            latestRunAt: "2026-03-17T18:30:00.000Z",
+            latestRunStatus: "succeeded",
+            provider: "simplefin",
+            status: "active",
+          },
+          {
+            configuredConnectionCount: 0,
+            lastSuccessfulSyncAt: null,
+            latestRunAt: null,
+            latestRunStatus: "never",
+            provider: "snaptrade",
+            status: "not_connected",
+          },
+        ],
+        hasSuccessfulSync: true,
         history: [
           {
             cashMinor: 4982340,
@@ -120,6 +164,25 @@ describe("Home route", () => {
     const props = {
       loaderData: {
         changeSummary: null,
+        connectionStates: [
+          {
+            configuredConnectionCount: 0,
+            lastSuccessfulSyncAt: null,
+            latestRunAt: null,
+            latestRunStatus: "never",
+            provider: "simplefin",
+            status: "not_connected",
+          },
+          {
+            configuredConnectionCount: 0,
+            lastSuccessfulSyncAt: null,
+            latestRunAt: null,
+            latestRunStatus: "never",
+            provider: "snaptrade",
+            status: "error",
+          },
+        ],
+        hasSuccessfulSync: false,
         history: [],
         householdName: "Vista Household",
         kind: "ready",
@@ -161,6 +224,10 @@ describe("Home route", () => {
     expect(html).toContain(">2<");
     expect(html).toContain("Cash Pocket");
     expect(html).toContain("Starter Fund");
+    expect(html).toContain(
+      "Using current account balances while the first sync comes online",
+    );
+    expect(html).toContain("Needs attention");
   });
 
   test("renders the seeded empty state when no household snapshot exists", () => {

@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { getDb } from "./client";
-import { getDashboardSnapshot } from "./queries";
+import { getDashboardSnapshot, getHomepageSnapshot } from "./queries";
 
 const createdAt = new Date("2026-03-15T12:00:00.000Z");
 const firstCompletedAt = new Date("2026-03-15T18:30:00.000Z");
@@ -196,6 +196,8 @@ function insertSucceededRun(
   values: {
     balances: Record<string, number>;
     completedAt: Date;
+    provider?: "simplefin" | "snaptrade";
+    providerConnectionId?: string;
     runId: string;
     startedAt: Date;
   },
@@ -210,8 +212,8 @@ function insertSucceededRun(
           trigger,
           started_at,
           completed_at
-        )
-        values (?, ?, ?, ?, ?, ?)
+      )
+      values (?, ?, ?, ?, ?, ?)
       `,
     )
     .run(
@@ -222,6 +224,22 @@ function insertSucceededRun(
       values.startedAt.getTime(),
       values.completedAt.getTime(),
     );
+
+  if (values.provider || values.providerConnectionId) {
+    sqlite
+      .query(
+        `
+          update sync_runs
+          set provider = ?, provider_connection_id = ?
+          where id = ?
+        `,
+      )
+      .run(
+        values.provider ?? null,
+        values.providerConnectionId ?? null,
+        values.runId,
+      );
+  }
 
   const insertSnapshot = sqlite.query(
     `
@@ -247,6 +265,47 @@ function insertSucceededRun(
       balanceMinor,
     );
   }
+}
+
+function insertProviderConnection(
+  sqlite: Database,
+  values: {
+    accessSecret?: null | string;
+    accessUrl?: null | string;
+    connectionId: string;
+    externalConnectionId: string;
+    provider: "simplefin" | "snaptrade";
+    status: "active" | "disconnected" | "error";
+  },
+) {
+  sqlite
+    .query(
+      `
+        insert into provider_connections (
+          id,
+          household_id,
+          provider,
+          external_connection_id,
+          status,
+          access_url,
+          access_secret,
+          created_at,
+          updated_at
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    )
+    .run(
+      values.connectionId,
+      "household_demo",
+      values.provider,
+      values.externalConnectionId,
+      values.status,
+      values.accessUrl ?? null,
+      values.accessSecret ?? null,
+      createdAt.getTime(),
+      secondCompletedAt.getTime(),
+    );
 }
 
 describe("getDashboardSnapshot", () => {
@@ -645,5 +704,142 @@ describe("getDashboardSnapshot", () => {
     const { db } = createTestDb();
 
     await expect(getDashboardSnapshot(db, "missing")).resolves.toBeNull();
+  });
+});
+
+describe("getHomepageSnapshot", () => {
+  test("returns reporting groups, history, and provider connection state for the homepage", async () => {
+    const { db, sqlite } = createTestDb();
+
+    insertProviderConnection(sqlite, {
+      accessUrl: "https://bridge.simplefin.org/access/demo",
+      connectionId: "conn_simplefin_primary",
+      externalConnectionId: "simplefin_primary",
+      provider: "simplefin",
+      status: "active",
+    });
+    insertSucceededRun(sqlite, {
+      balances: {
+        acct_brokerage: 16180000,
+        acct_checking: 1240000,
+        acct_retirement: 24280000,
+        acct_savings: 3500000,
+      },
+      completedAt: firstCompletedAt,
+      provider: "simplefin",
+      providerConnectionId: "conn_simplefin_primary",
+      runId: "sync_seed_2026_03_15",
+      startedAt: new Date("2026-03-15T18:25:00.000Z"),
+    });
+    insertSucceededRun(sqlite, {
+      balances: {
+        acct_brokerage: 16450320,
+        acct_checking: 1284500,
+        acct_retirement: 24311890,
+        acct_savings: 3527600,
+      },
+      completedAt: secondCompletedAt,
+      provider: "simplefin",
+      providerConnectionId: "conn_simplefin_primary",
+      runId: "sync_seed_2026_03_16",
+      startedAt: new Date("2026-03-16T18:25:00.000Z"),
+    });
+
+    const snapshot = await getHomepageSnapshot(db);
+
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.reportingGroups).toEqual([
+      {
+        accounts: [
+          {
+            balanceMinor: 3527600,
+            id: "acct_savings",
+            institutionName: "US Bank",
+            name: "Rainy Day Savings",
+          },
+          {
+            balanceMinor: 1284500,
+            id: "acct_checking",
+            institutionName: "US Bank",
+            name: "Everyday Checking",
+          },
+        ],
+        key: "cash",
+        label: "Cash",
+        totalMinor: 4812100,
+      },
+      {
+        accounts: [
+          {
+            balanceMinor: 24311890,
+            id: "acct_retirement",
+            institutionName: "Vanguard",
+            name: "Rollover IRA",
+          },
+          {
+            balanceMinor: 16450320,
+            id: "acct_brokerage",
+            institutionName: "Vanguard",
+            name: "Taxable Brokerage",
+          },
+        ],
+        key: "investments",
+        label: "Investments",
+        totalMinor: 40762210,
+      },
+    ]);
+    expect(snapshot?.history).toHaveLength(2);
+    expect(snapshot?.connectionStates).toEqual([
+      {
+        configuredConnectionCount: 1,
+        lastSuccessfulSyncAt: secondCompletedAt,
+        latestRunAt: secondCompletedAt,
+        latestRunStatus: "succeeded",
+        provider: "simplefin",
+        status: "active",
+      },
+      {
+        configuredConnectionCount: 0,
+        lastSuccessfulSyncAt: null,
+        latestRunAt: null,
+        latestRunStatus: "never",
+        provider: "snaptrade",
+        status: "not_connected",
+      },
+    ]);
+  });
+
+  test("returns provider attention states even before the first successful sync", async () => {
+    const { db, sqlite } = createTestDb();
+
+    insertProviderConnection(sqlite, {
+      accessSecret: "snaptrade-secret",
+      connectionId: "conn_snaptrade_primary",
+      externalConnectionId: "snaptrade_primary",
+      provider: "snaptrade",
+      status: "error",
+    });
+
+    const snapshot = await getHomepageSnapshot(db);
+
+    expect(snapshot?.hasSuccessfulSync).toBe(false);
+    expect(snapshot?.connectionStates).toEqual([
+      {
+        configuredConnectionCount: 0,
+        lastSuccessfulSyncAt: null,
+        latestRunAt: null,
+        latestRunStatus: "never",
+        provider: "simplefin",
+        status: "not_connected",
+      },
+      {
+        configuredConnectionCount: 0,
+        lastSuccessfulSyncAt: null,
+        latestRunAt: null,
+        latestRunStatus: "never",
+        provider: "snaptrade",
+        status: "error",
+      },
+    ]);
   });
 });
