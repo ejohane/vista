@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveDevPort } from "./dev-ports";
+import { loadLocalEnvFile, syncCloudflareDevVarsFiles } from "./local-env";
 
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -32,6 +33,12 @@ const defaultWebPort = 5173;
 const defaultSyncPort = 8788;
 const shouldSkipSeed =
   process.argv.includes("--skip-seed") || process.env.VISTA_SKIP_SEED === "1";
+const { filePath: localEnvFilePath, values: localEnv } =
+  loadLocalEnvFile(rootDir);
+const commandEnv = {
+  ...localEnv,
+  ...process.env,
+};
 
 type RunningProcess = {
   label: string;
@@ -47,6 +54,7 @@ async function runCommand(command: string[], label: string) {
 
   const child = Bun.spawn(command, {
     cwd: rootDir,
+    env: commandEnv,
     stderr: "inherit",
     stdout: "inherit",
   });
@@ -131,6 +139,7 @@ function spawnService(
 ): RunningProcess {
   const child = Bun.spawn(command, {
     cwd,
+    env: commandEnv,
     stderr: "inherit",
     stdin: "inherit",
     stdout: "inherit",
@@ -140,6 +149,22 @@ function spawnService(
 }
 
 async function main() {
+  const configuredLocalEnvKeys = Object.keys(localEnv);
+
+  if (configuredLocalEnvKeys.length > 0) {
+    logStep(
+      `Loaded ${configuredLocalEnvKeys.length} local environment variable${configuredLocalEnvKeys.length === 1 ? "" : "s"} from ${path.basename(localEnvFilePath)}.`,
+    );
+  }
+
+  syncCloudflareDevVarsFiles({
+    sourceFileLabel: path.relative(rootDir, localEnvFilePath) || ".env.local",
+    targetDirs: [webAppDir, syncAppDir],
+    values: Object.fromEntries(
+      configuredLocalEnvKeys.map((key) => [key, commandEnv[key] ?? ""]),
+    ),
+  });
+
   await ensureLocalDbReady();
 
   const webPort = await resolveDevPort({

@@ -9,4 +9,7 @@ coverage
 *.sqlite-shm
 *.sqlite-wal
 *.tsbuildinfo
+.env.local
+.env.*.local
 .dev.vars
+.dev.vars.*
