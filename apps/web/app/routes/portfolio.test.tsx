@@ -69,13 +69,14 @@ describe("portfolio route", () => {
       />,
     );
 
-    expect(html).toContain("Portfolio composition");
-    expect(html).toContain("Total invested");
+    expect(html).toContain("Investment Portfolio");
+    expect(html).toContain("Market value");
     expect(html).toContain("Unrealized gain");
-    expect(html).toContain("Equities");
-    expect(html).toContain("Top holdings");
+    expect(html).toContain("Asset Allocation");
+    expect(html).toContain("Top Holdings");
+    expect(html).toContain("Account Sleeves");
     expect(html).toContain("Vanguard Total Stock Market ETF");
-    expect(html).toContain("/accounts/review");
+    expect(html).toContain("Taxable Brokerage");
   });
 
   test("renders the empty portfolio state when no holdings exist yet", () => {
@@ -87,10 +88,10 @@ describe("portfolio route", () => {
       />,
     );
 
-    expect(html).toContain("Portfolio composition");
-    expect(html).toContain("No investment holdings yet");
+    expect(html).toContain("Investment Portfolio");
+    expect(html).toContain("No holdings yet");
     expect(html).toContain("Connect Plaid");
     expect(html).toContain("/connect/plaid");
-    expect(html).toContain("/");
+    expect(html).toContain("/connect/snaptrade");
   });
 });

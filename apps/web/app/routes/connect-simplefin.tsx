@@ -2,6 +2,7 @@ import { ArrowSquareOutIcon, LinkBreakIcon } from "@phosphor-icons/react";
 import { syncSimplefinConnection } from "@vista/simplefin";
 import { Form, redirect, useActionData, useNavigation } from "react-router";
 
+import { DashboardShell } from "@/components/dashboard-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -82,8 +83,8 @@ export default function ConnectSimplefin() {
   const isSubmitting = navigation.state === "submitting";
 
   return (
-    <main className="min-h-screen bg-background px-4 py-10 md:px-6">
-      <div className="mx-auto flex max-w-5xl flex-col gap-6">
+    <DashboardShell activePath="/connect/simplefin">
+      <div className="mx-auto flex max-w-5xl flex-col gap-6 p-5 lg:p-8">
         <Card className="border-border/70 bg-card/95 shadow-sm">
           <CardHeader className="gap-4">
             <div className="space-y-3">
@@ -190,6 +191,6 @@ export default function ConnectSimplefin() {
           </CardContent>
         </Card>
       </div>
-    </main>
+    </DashboardShell>
   );
 }
