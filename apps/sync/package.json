@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@vista/db": "workspace:*",
+    "@vista/plaid": "workspace:*",
     "@vista/simplefin": "workspace:*",
     "@vista/snaptrade": "workspace:*"
   },

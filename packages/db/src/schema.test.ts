@@ -337,6 +337,133 @@ describe("schema foundation for provider-backed sync", () => {
     ).toThrow();
   });
 
+  test("supports Plaid-backed liability account types", () => {
+    const sqlite = createSchemaTestDatabase();
+    const createdAt = new Date("2026-03-18T00:00:00.000Z").getTime();
+
+    sqlite
+      .query(
+        `
+          insert into households (id, name, last_synced_at, created_at)
+          values (?, ?, ?, ?)
+        `,
+      )
+      .run("household_demo", "Vista Household", createdAt, createdAt);
+    sqlite
+      .query(
+        `
+          insert into provider_connections (
+            id,
+            household_id,
+            provider,
+            status,
+            external_connection_id,
+            access_token,
+            plaid_item_id,
+            institution_name,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "conn_plaid_vanguard",
+        "household_demo",
+        "plaid",
+        "active",
+        "item-vanguard-1",
+        "access-vanguard-1",
+        "item-vanguard-1",
+        "Vanguard",
+        createdAt,
+        createdAt,
+      );
+    sqlite
+      .query(
+        `
+          insert into provider_accounts (
+            id,
+            provider_connection_id,
+            provider_account_id,
+            name,
+            institution_name,
+            account_type,
+            account_subtype,
+            currency,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "prov_acct_mortgage",
+        "conn_plaid_vanguard",
+        "plaid-account-123",
+        "Primary Mortgage",
+        "Vanguard",
+        "mortgage",
+        "mortgage",
+        "USD",
+        createdAt,
+        createdAt,
+      );
+    sqlite
+      .query(
+        `
+          insert into accounts (
+            id,
+            household_id,
+            provider_account_id,
+            name,
+            institution_name,
+            account_type,
+            reporting_group,
+            balance_minor,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "acct_mortgage",
+        "household_demo",
+        "prov_acct_mortgage",
+        "Primary Mortgage",
+        "Vanguard",
+        "mortgage",
+        "liabilities",
+        -42500000,
+        createdAt,
+        createdAt,
+      );
+
+    expect(
+      sqlite
+        .query(
+          `
+            select
+              provider_connections.provider as provider,
+              provider_connections.access_token as accessToken,
+              accounts.account_type as accountType,
+              accounts.reporting_group as reportingGroup
+            from provider_connections
+            join provider_accounts on provider_accounts.provider_connection_id = provider_connections.id
+            join accounts on accounts.provider_account_id = provider_accounts.id
+            where accounts.id = ?
+          `,
+        )
+        .get("acct_mortgage"),
+    ).toEqual({
+      accessToken: "access-vanguard-1",
+      accountType: "mortgage",
+      provider: "plaid",
+      reportingGroup: "liabilities",
+    });
+  });
+
   test("stores provider-linked sync runs and deduplicates transactions by account and provider transaction id", () => {
     const sqlite = createSchemaTestDatabase();
     const createdAt = new Date("2026-03-18T00:00:00.000Z").getTime();

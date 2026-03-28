@@ -196,7 +196,7 @@ function insertSucceededRun(
   values: {
     balances: Record<string, number>;
     completedAt: Date;
-    provider?: "simplefin" | "snaptrade";
+    provider?: "plaid" | "simplefin" | "snaptrade";
     providerConnectionId?: string;
     runId: string;
     startedAt: Date;
@@ -270,11 +270,12 @@ function insertSucceededRun(
 function insertProviderConnection(
   sqlite: Database,
   values: {
+    accessToken?: null | string;
     accessSecret?: null | string;
     accessUrl?: null | string;
     connectionId: string;
     externalConnectionId: string;
-    provider: "simplefin" | "snaptrade";
+    provider: "plaid" | "simplefin" | "snaptrade";
     status: "active" | "disconnected" | "error";
   },
 ) {
@@ -287,12 +288,13 @@ function insertProviderConnection(
           provider,
           external_connection_id,
           status,
+          access_token,
           access_url,
           access_secret,
           created_at,
           updated_at
         )
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
     )
     .run(
@@ -301,6 +303,7 @@ function insertProviderConnection(
       values.provider,
       values.externalConnectionId,
       values.status,
+      values.accessToken ?? null,
       values.accessUrl ?? null,
       values.accessSecret ?? null,
       createdAt.getTime(),
@@ -791,6 +794,14 @@ describe("getHomepageSnapshot", () => {
     expect(snapshot?.history).toHaveLength(2);
     expect(snapshot?.connectionStates).toEqual([
       {
+        configuredConnectionCount: 0,
+        lastSuccessfulSyncAt: null,
+        latestRunAt: null,
+        latestRunStatus: "never",
+        provider: "plaid",
+        status: "not_connected",
+      },
+      {
         configuredConnectionCount: 1,
         lastSuccessfulSyncAt: secondCompletedAt,
         latestRunAt: secondCompletedAt,
@@ -824,6 +835,14 @@ describe("getHomepageSnapshot", () => {
 
     expect(snapshot?.hasSuccessfulSync).toBe(false);
     expect(snapshot?.connectionStates).toEqual([
+      {
+        configuredConnectionCount: 0,
+        lastSuccessfulSyncAt: null,
+        latestRunAt: null,
+        latestRunStatus: "never",
+        provider: "plaid",
+        status: "not_connected",
+      },
       {
         configuredConnectionCount: 0,
         lastSuccessfulSyncAt: null,

@@ -307,7 +307,7 @@ export function PortfolioScreen({ loaderData }: { loaderData: LoaderData }) {
             ? normalizedSearch
               ? `Filtering portfolio holdings for "${searchValue}".`
               : "Use this screen to inspect allocation, not daily movement."
-            : "Run a SnapTrade sync after saving a provider connection."
+            : "Connect Plaid and run the first sync to populate holdings."
         }
         onSearchValueChange={setSearchValue}
         searchDisabled={loaderData.kind === "empty"}
@@ -455,13 +455,14 @@ export function PortfolioScreen({ loaderData }: { loaderData: LoaderData }) {
                         No investment holdings yet
                       </p>
                       <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-                        Run a SnapTrade sync after saving a provider connection.
-                        Once holdings are imported, this page will show current
-                        allocation, top positions, and account-level splits.
+                        Connect Plaid and run the first sync after saving a
+                        provider connection. Once holdings are imported, this
+                        page will show current allocation, top positions, and
+                        account-level splits.
                       </p>
                       <div className="mt-5 flex flex-wrap items-center gap-3">
                         <a
-                          href="/connect/snaptrade"
+                          href="/connect/plaid"
                           className={cn(
                             buttonVariants({
                               size: "sm",
@@ -469,7 +470,7 @@ export function PortfolioScreen({ loaderData }: { loaderData: LoaderData }) {
                             }),
                           )}
                         >
-                          Connect SnapTrade
+                          Connect Plaid
                         </a>
                         <a
                           href="/"

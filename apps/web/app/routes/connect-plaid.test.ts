@@ -1,0 +1,168 @@
+import { describe, expect, mock, test } from "bun:test";
+
+import {
+  createConnectPlaidAction,
+  createConnectPlaidLoader,
+} from "./connect-plaid";
+
+describe("connect plaid route loader", () => {
+  test("creates a link token when Plaid is configured", async () => {
+    const createLinkTokenMock = mock(async () => {
+      return {
+        householdId: "household_default",
+        householdWasCreated: true,
+        linkToken: "link-sandbox-101",
+      };
+    });
+    const loader = createConnectPlaidLoader({
+      createPlaidLinkToken: createLinkTokenMock,
+    });
+
+    const result = await loader({
+      context: {
+        cloudflare: {
+          env: {
+            DB: {} as D1Database,
+            PLAID_CLIENT_ID: "client-demo",
+            PLAID_ENV: "sandbox",
+            PLAID_SECRET: "secret-demo",
+          },
+        },
+      },
+    } as never);
+
+    expect(result).toEqual({
+      kind: "ready",
+      linkToken: "link-sandbox-101",
+    });
+    expect(createLinkTokenMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: "client-demo",
+        database: {} as D1Database,
+        environment: "sandbox",
+        secret: "secret-demo",
+      }),
+    );
+  });
+
+  test("returns a config error when Plaid credentials are missing", async () => {
+    const loader = createConnectPlaidLoader({
+      createPlaidLinkToken: mock(async () => {
+        throw new Error("createPlaidLinkToken should not be called");
+      }),
+    });
+
+    const result = await loader({
+      context: {
+        cloudflare: {
+          env: {
+            DB: {} as D1Database,
+          },
+        },
+      },
+    } as never);
+
+    expect(result).toEqual({
+      kind: "error",
+      message:
+        "Set PLAID_CLIENT_ID and PLAID_SECRET before launching Plaid Link.",
+      title: "Plaid is not configured",
+    });
+  });
+});
+
+describe("connect plaid route action", () => {
+  test("exchanges the Link callback token, runs the first sync, and redirects home", async () => {
+    const exchangeMock = mock(async () => {
+      return {
+        connectionId: "conn:plaid:item-demo-101",
+        householdId: "household_default",
+        householdWasCreated: true,
+      };
+    });
+    const syncMock = mock(async () => {
+      return {
+        recordsChanged: 3,
+        runId: "sync:plaid:demo-101",
+        status: "succeeded" as const,
+      };
+    });
+    const action = createConnectPlaidAction({
+      exchangePlaidPublicToken: exchangeMock,
+      syncPlaidConnection: syncMock,
+    });
+    const formData = new FormData();
+    formData.set("publicToken", "public-sandbox-101");
+    formData.set("institutionId", "ins_109508");
+    formData.set("institutionName", "Vanguard");
+
+    const response = (await action({
+      context: {
+        cloudflare: {
+          env: {
+            DB: {} as D1Database,
+            PLAID_CLIENT_ID: "client-demo",
+            PLAID_ENV: "sandbox",
+            PLAID_SECRET: "secret-demo",
+          },
+        },
+      },
+      request: new Request("http://localhost/connect/plaid", {
+        body: formData,
+        method: "POST",
+      }),
+    } as never)) as Response;
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/");
+    expect(exchangeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: "client-demo",
+        database: {} as D1Database,
+        environment: "sandbox",
+        institutionId: "ins_109508",
+        institutionName: "Vanguard",
+        publicToken: "public-sandbox-101",
+        secret: "secret-demo",
+      }),
+    );
+    expect(syncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: "client-demo",
+        connectionId: "conn:plaid:item-demo-101",
+        database: {} as D1Database,
+        environment: "sandbox",
+        secret: "secret-demo",
+      }),
+    );
+  });
+
+  test("returns an actionable error when Plaid credentials are missing", async () => {
+    const action = createConnectPlaidAction({
+      exchangePlaidPublicToken: mock(async () => {
+        throw new Error("exchangePlaidPublicToken should not be called");
+      }),
+      syncPlaidConnection: mock(async () => {
+        throw new Error("syncPlaidConnection should not be called");
+      }),
+    });
+    const result = await action({
+      context: {
+        cloudflare: {
+          env: {
+            DB: {} as D1Database,
+          },
+        },
+      },
+      request: new Request("http://localhost/connect/plaid", {
+        method: "POST",
+      }),
+    } as never);
+
+    expect(result).toEqual({
+      message:
+        "Set PLAID_CLIENT_ID and PLAID_SECRET before starting Plaid onboarding.",
+      ok: false,
+    });
+  });
+});
