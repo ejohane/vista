@@ -89,8 +89,8 @@ describe("portfolio route", () => {
 
     expect(html).toContain("Portfolio composition");
     expect(html).toContain("No investment holdings yet");
-    expect(html).toContain("Run a SnapTrade sync");
-    expect(html).toContain("/connect/snaptrade");
+    expect(html).toContain("Connect Plaid");
+    expect(html).toContain("/connect/plaid");
     expect(html).toContain("/");
   });
 });

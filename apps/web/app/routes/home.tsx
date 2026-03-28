@@ -59,11 +59,16 @@ type ConnectionStateForDisplay = {
   lastSuccessfulSyncAt: null | string;
   latestRunAt: null | string;
   latestRunStatus: "failed" | "never" | "running" | "succeeded";
-  provider: "simplefin" | "snaptrade";
+  provider: "plaid" | "simplefin" | "snaptrade";
   status: "active" | "disconnected" | "error" | "not_connected";
 };
 
 const providerMeta = {
+  plaid: {
+    eyebrow: "Banking and investing",
+    href: "/connect/plaid",
+    name: "Plaid",
+  },
   simplefin: {
     eyebrow: "Banking",
     href: "/connect/simplefin",
@@ -445,8 +450,14 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           </div>
           <div className="flex flex-col gap-2">
             <a
-              href="/connect/simplefin"
+              href="/connect/plaid"
               className={cn(buttonVariants({ variant: "default" }), "w-full")}
+            >
+              Connect Plaid
+            </a>
+            <a
+              href="/connect/simplefin"
+              className={cn(buttonVariants({ variant: "outline" }), "w-full")}
             >
               Connect SimpleFIN
             </a>

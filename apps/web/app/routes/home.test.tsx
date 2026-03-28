@@ -14,6 +14,14 @@ describe("Home route", () => {
         },
         connectionStates: [
           {
+            configuredConnectionCount: 0,
+            lastSuccessfulSyncAt: null,
+            latestRunAt: null,
+            latestRunStatus: "never",
+            provider: "plaid",
+            status: "not_connected",
+          },
+          {
             configuredConnectionCount: 1,
             lastSuccessfulSyncAt: "2026-03-16T18:30:00.000Z",
             latestRunAt: "2026-03-16T18:30:00.000Z",
@@ -98,12 +106,14 @@ describe("Home route", () => {
     expect(html).toContain("Investments");
     expect(html).toContain("Everyday Checking");
     expect(html).toContain("Taxable Brokerage");
+    expect(html).toContain("Plaid");
     expect(html).toContain("SimpleFIN");
     expect(html).toContain("SnapTrade");
     expect(html).toContain("Connected");
     expect(html).toContain("Not connected");
     expect(html).toContain("/accounts/review");
     expect(html).toContain("/portfolio");
+    expect(html).toContain("/connect/plaid");
     expect(html).toContain("/connect/simplefin");
     expect(html).toContain("/connect/snaptrade");
   });
@@ -113,6 +123,14 @@ describe("Home route", () => {
       loaderData: {
         changeSummary: null,
         connectionStates: [
+          {
+            configuredConnectionCount: 0,
+            lastSuccessfulSyncAt: null,
+            latestRunAt: null,
+            latestRunStatus: "never",
+            provider: "plaid",
+            status: "not_connected",
+          },
           {
             configuredConnectionCount: 1,
             lastSuccessfulSyncAt: "2026-03-17T18:30:00.000Z",
@@ -165,6 +183,14 @@ describe("Home route", () => {
       loaderData: {
         changeSummary: null,
         connectionStates: [
+          {
+            configuredConnectionCount: 0,
+            lastSuccessfulSyncAt: null,
+            latestRunAt: null,
+            latestRunStatus: "never",
+            provider: "plaid",
+            status: "not_connected",
+          },
           {
             configuredConnectionCount: 0,
             lastSuccessfulSyncAt: null,
@@ -244,6 +270,7 @@ describe("Home route", () => {
 
     expect(html).toContain("Welcome to Vista");
     expect(html).toContain("bun run db:seed:local");
+    expect(html).toContain("/connect/plaid");
     expect(html).toContain("/connect/simplefin");
     expect(html).toContain("/connect/snaptrade");
   });

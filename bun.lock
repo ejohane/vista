@@ -16,6 +16,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@vista/db": "workspace:*",
+        "@vista/plaid": "workspace:*",
         "@vista/simplefin": "workspace:*",
         "@vista/snaptrade": "workspace:*",
       },
@@ -32,6 +33,7 @@
         "@fontsource-variable/figtree": "^5.2.10",
         "@phosphor-icons/react": "^2.1.10",
         "@vista/db": "workspace:*",
+        "@vista/plaid": "workspace:*",
         "@vista/simplefin": "workspace:*",
         "@vista/snaptrade": "workspace:*",
         "class-variance-authority": "^0.7.1",
@@ -67,6 +69,15 @@
       },
       "devDependencies": {
         "@cloudflare/workers-types": "^4.20260303.0",
+        "typescript": "^5.9.2",
+      },
+    },
+    "packages/plaid": {
+      "name": "@vista/plaid",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@cloudflare/workers-types": "^4.20260303.0",
+        "bun-types": "^1.3.10",
         "typescript": "^5.9.2",
       },
     },
@@ -498,6 +509,8 @@
     "@types/validate-npm-package-name": ["@types/validate-npm-package-name@4.0.2", "", {}, "sha512-lrpDziQipxCEeK5kWxvljWYhUvOiB2A9izZd9B2AFarYAkqZshb4lPbRs7zKEic6eGtH8V/2qJW+dPp9OtF6bw=="],
 
     "@vista/db": ["@vista/db@workspace:packages/db"],
+
+    "@vista/plaid": ["@vista/plaid@workspace:packages/plaid"],
 
     "@vista/simplefin": ["@vista/simplefin@workspace:packages/simplefin"],
 

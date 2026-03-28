@@ -1,12 +1,18 @@
 import { getDashboardSnapshot, getDb } from "@vista/db";
 
 import { ingestDemoSyncBatch } from "./fixture-sync";
+import { syncConfiguredPlaidConnections } from "./plaid-sync";
 import { syncConfiguredSimplefinConnections } from "./simplefin-sync";
 import { syncConfiguredSnaptradeConnections } from "./snaptrade-sync";
 
 function readOptionalEnvString(
   env: Env,
-  key: "SNAPTRADE_CLIENT_ID" | "SNAPTRADE_CONSUMER_KEY",
+  key:
+    | "PLAID_CLIENT_ID"
+    | "PLAID_ENV"
+    | "PLAID_SECRET"
+    | "SNAPTRADE_CLIENT_ID"
+    | "SNAPTRADE_CONSUMER_KEY",
 ) {
   const value = (env as Env & Record<string, unknown>)[key];
 
@@ -42,11 +48,12 @@ async function hasConfiguredProviderConnection(env: Env) {
         and (
           (provider = ? and access_url is not null)
           or (provider = ? and access_secret is not null)
+          or (provider = ? and access_token is not null)
         )
       limit 1
     `,
   )
-    .bind("active", "simplefin", "snaptrade")
+    .bind("active", "simplefin", "snaptrade", "plaid")
     .first<{ id: string }>();
 
   return configuredConnection !== null;
@@ -72,6 +79,17 @@ export default {
 
   async scheduled(event, env) {
     const hasConfiguredConnections = await hasConfiguredProviderConnection(env);
+    const plaidResults = await syncConfiguredPlaidConnections({
+      clientId: readOptionalEnvString(env, "PLAID_CLIENT_ID"),
+      database: env.DB,
+      environment:
+        (readOptionalEnvString(env, "PLAID_ENV") as
+          | "development"
+          | "production"
+          | "sandbox"
+          | undefined) ?? undefined,
+      secret: readOptionalEnvString(env, "PLAID_SECRET"),
+    });
     const simplefinResults = await syncConfiguredSimplefinConnections({
       database: env.DB,
     });
@@ -80,7 +98,11 @@ export default {
       consumerKey: readOptionalEnvString(env, "SNAPTRADE_CONSUMER_KEY"),
       database: env.DB,
     });
-    const syncResults = [...simplefinResults, ...snaptradeResults];
+    const syncResults = [
+      ...plaidResults,
+      ...simplefinResults,
+      ...snaptradeResults,
+    ];
     const ingestResult =
       !hasConfiguredConnections && syncResults.length === 0
         ? await ingestDemoSyncBatch(env.DB)

@@ -17,16 +17,24 @@ const accountTypeLabels = {
   brokerage: "Brokerage",
   checking: "Checking",
   credit_card: "Credit Card",
+  line_of_credit: "Line of Credit",
+  loan: "Loan",
+  mortgage: "Mortgage",
   retirement: "Retirement",
   savings: "Savings",
+  student_loan: "Student Loan",
 } as const;
 
 const accountTypeReportingGroups = {
   brokerage: "investments",
   checking: "cash",
   credit_card: "liabilities",
+  line_of_credit: "liabilities",
+  loan: "liabilities",
+  mortgage: "liabilities",
   retirement: "investments",
   savings: "cash",
+  student_loan: "liabilities",
 } as const;
 
 const accountTypeKeys = Object.keys(accountTypeLabels) as Array<
@@ -242,8 +250,12 @@ function buildAccountTypeGroups(accountsForGroups: HouseholdAccountSnapshot[]) {
         brokerage: { accounts: [], totalMinor: 0 },
         checking: { accounts: [], totalMinor: 0 },
         credit_card: { accounts: [], totalMinor: 0 },
+        line_of_credit: { accounts: [], totalMinor: 0 },
+        loan: { accounts: [], totalMinor: 0 },
+        mortgage: { accounts: [], totalMinor: 0 },
         retirement: { accounts: [], totalMinor: 0 },
         savings: { accounts: [], totalMinor: 0 },
+        student_loan: { accounts: [], totalMinor: 0 },
       },
     ),
   )
@@ -325,8 +337,12 @@ function createAccountTypeTotals() {
     brokerage: 0,
     checking: 0,
     credit_card: 0,
+    line_of_credit: 0,
+    loan: 0,
+    mortgage: 0,
     retirement: 0,
     savings: 0,
+    student_loan: 0,
   } satisfies Record<keyof typeof accountTypeLabels, number>;
 }
 
@@ -369,6 +385,7 @@ async function loadHomepageConnectionStates(
   const [connectionRows, runRows] = await Promise.all([
     db
       .select({
+        accessToken: providerConnections.accessToken,
         accessSecret: providerConnections.accessSecret,
         accessUrl: providerConnections.accessUrl,
         provider: providerConnections.provider,
@@ -393,11 +410,21 @@ async function loadHomepageConnectionStates(
       (connection) => connection.provider === provider,
     );
     const configuredConnectionCount = providerConnectionsForProvider.filter(
-      (connection) =>
-        connection.status === "active" &&
-        (provider === "simplefin"
-          ? Boolean(connection.accessUrl)
-          : Boolean(connection.accessSecret)),
+      (connection) => {
+        if (connection.status !== "active") {
+          return false;
+        }
+
+        if (provider === "simplefin") {
+          return Boolean(connection.accessUrl);
+        }
+
+        if (provider === "snaptrade") {
+          return Boolean(connection.accessSecret);
+        }
+
+        return Boolean(connection.accessToken);
+      },
     ).length;
     const status: HomepageSnapshot["connectionStates"][number]["status"] =
       configuredConnectionCount > 0

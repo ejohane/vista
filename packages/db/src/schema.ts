@@ -14,7 +14,7 @@ export type SyncRunStatus = (typeof syncRunStatuses)[number];
 export const syncRunTriggers = ["seed", "scheduled"] as const;
 export type SyncRunTrigger = (typeof syncRunTriggers)[number];
 
-export const providerTypes = ["simplefin", "snaptrade"] as const;
+export const providerTypes = ["plaid", "simplefin", "snaptrade"] as const;
 export type ProviderType = (typeof providerTypes)[number];
 
 export const providerConnectionStatuses = [
@@ -34,6 +34,10 @@ export const accountTypes = [
   "credit_card",
   "brokerage",
   "retirement",
+  "mortgage",
+  "student_loan",
+  "loan",
+  "line_of_credit",
 ] as const;
 export type AccountType = (typeof accountTypes)[number];
 
@@ -63,6 +67,7 @@ export const households = sqliteTable("households", {
 export const providerConnections = sqliteTable(
   "provider_connections",
   {
+    accessToken: text("access_token"),
     accessSecret: text("access_secret"),
     accessUrl: text("access_url"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
@@ -71,6 +76,9 @@ export const providerConnections = sqliteTable(
       .notNull()
       .references(() => households.id),
     id: text("id").primaryKey(),
+    institutionId: text("institution_id"),
+    institutionName: text("institution_name"),
+    plaidItemId: text("plaid_item_id"),
     provider: text("provider", {
       enum: providerTypes,
     }).notNull(),
@@ -82,7 +90,7 @@ export const providerConnections = sqliteTable(
   (table) => [
     check(
       "provider_connections_provider_check",
-      sql`${table.provider} in ('simplefin', 'snaptrade')`,
+      sql`${table.provider} in ('simplefin', 'snaptrade', 'plaid')`,
     ),
     check(
       "provider_connections_status_check",
@@ -117,7 +125,7 @@ export const providerAccounts = sqliteTable(
   (table) => [
     check(
       "provider_accounts_account_type_check",
-      sql`${table.accountType} in ('checking', 'savings', 'credit_card', 'brokerage', 'retirement')`,
+      sql`${table.accountType} in ('checking', 'savings', 'credit_card', 'brokerage', 'retirement', 'mortgage', 'student_loan', 'loan', 'line_of_credit')`,
     ),
     index("provider_accounts_connection_idx").on(table.providerConnectionId),
     uniqueIndex("provider_accounts_connection_native_idx").on(
@@ -170,7 +178,7 @@ export const accounts = sqliteTable(
   (table) => [
     check(
       "accounts_account_type_check",
-      sql`${table.accountType} in ('checking', 'savings', 'credit_card', 'brokerage', 'retirement')`,
+      sql`${table.accountType} in ('checking', 'savings', 'credit_card', 'brokerage', 'retirement', 'mortgage', 'student_loan', 'loan', 'line_of_credit')`,
     ),
     check(
       "accounts_reporting_group_check",
@@ -181,7 +189,7 @@ export const accounts = sqliteTable(
       sql`(
       (${table.accountType} in ('checking', 'savings') and ${table.reportingGroup} = 'cash')
       or
-      (${table.accountType} = 'credit_card' and ${table.reportingGroup} = 'liabilities')
+      (${table.accountType} in ('credit_card', 'mortgage', 'student_loan', 'loan', 'line_of_credit') and ${table.reportingGroup} = 'liabilities')
       or
       (${table.accountType} in ('brokerage', 'retirement') and ${table.reportingGroup} = 'investments')
     )`,
@@ -234,7 +242,7 @@ export const syncRuns = sqliteTable(
     ),
     check(
       "sync_runs_provider_check",
-      sql`${table.provider} is null or ${table.provider} in ('simplefin', 'snaptrade')`,
+      sql`${table.provider} is null or ${table.provider} in ('simplefin', 'snaptrade', 'plaid')`,
     ),
     index("sync_runs_household_idx").on(table.householdId),
     index("sync_runs_household_completed_idx").on(
@@ -347,6 +355,7 @@ export const holdings = sqliteTable(
     holdingKey: text("holding_key").notNull(),
     id: text("id").primaryKey(),
     name: text("name").notNull(),
+    securityId: text("security_id"),
     subAssetClass: text("sub_asset_class"),
     symbol: text("symbol"),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
