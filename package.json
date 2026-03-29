@@ -17,6 +17,8 @@
     "db:seed:local": "wrangler d1 execute vista-dev --local --config apps/web/wrangler.jsonc --file packages/db/seeds/dev.sql",
     "dev": "bun run scripts/dev.ts",
     "dev:empty": "bun run scripts/dev.ts --skip-seed",
+    "dev:reset": "./scripts/dev-reset.sh",
+    "dev:worktree": "./scripts/dev.sh",
     "dev:sync": "bun run --cwd apps/sync dev",
     "dev:web": "bun run --cwd apps/web dev",
     "format": "biome format --write .",
