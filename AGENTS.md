@@ -11,6 +11,9 @@ It documents the commands and coding conventions actually used in this repositor
   - `bun run prepare`
 - Start full local dev flow (typegen, migrate, seed-if-needed, web + sync workers):
   - `bun run dev`
+- Start the full local dev flow from a non-`main` git worktree:
+  - `bun run dev:worktree`
+- Use `bun run dev` in the main worktree and `bun run dev:worktree` in secondary worktrees so local ports, `.env.local`, and Wrangler state are isolated safely.
 - Start dev without seeding demo data:
   - `bun run dev:empty`
 
@@ -51,6 +54,8 @@ It documents the commands and coding conventions actually used in this repositor
 
 ## Database and Local Infra Commands
 
+- Re-initialize a secondary worktree's linked env and local worker state:
+  - `bun run dev:worktree`
 - Generate Drizzle migrations from schema:
   - `bun run db:generate`
 - Apply local D1 migrations:
