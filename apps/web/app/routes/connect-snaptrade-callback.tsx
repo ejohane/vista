@@ -6,6 +6,7 @@ import {
 } from "@vista/snaptrade";
 import { redirect, useLoaderData } from "react-router";
 
+import { DashboardShell } from "@/components/dashboard-shell";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -175,8 +176,8 @@ export default function ConnectSnaptradeCallback() {
   const loaderData = useLoaderData() as LoaderData;
 
   return (
-    <main className="min-h-screen bg-background px-4 py-10 md:px-6">
-      <div className="mx-auto flex max-w-3xl flex-col gap-6">
+    <DashboardShell activePath="/connect/snaptrade">
+      <div className="mx-auto flex max-w-3xl flex-col gap-6 p-5 lg:p-8">
         <Card className="border-border/70 bg-card/95 shadow-sm">
           <CardHeader className="gap-4">
             <div className="flex size-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-900">
@@ -225,6 +226,6 @@ export default function ConnectSnaptradeCallback() {
           </p>
         </div>
       </div>
-    </main>
+    </DashboardShell>
   );
 }

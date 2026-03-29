@@ -245,10 +245,10 @@ describe("account review route", () => {
       />,
     );
 
-    expect(html).toContain("Review imported accounts");
+    expect(html).toContain("Account Curation");
     expect(html).toContain("Household Operating");
-    expect(html).toContain("Exclude from household reporting");
-    expect(html).toContain("Hide on the snapshot");
+    expect(html).toContain("Include in reporting");
+    expect(html).toContain("Hide on snapshot");
     expect(html).toContain("Credit Card");
     expect(html).toContain("Saved changes for Household Operating.");
   });

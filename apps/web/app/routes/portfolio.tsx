@@ -1,17 +1,9 @@
-import { BuildingsIcon } from "@phosphor-icons/react";
+import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { getDb, getPortfolioSnapshot } from "@vista/db";
-import { useState } from "react";
+import { useDeferredValue, useState } from "react";
 
-import type { AppSidebarSection } from "@/components/app-sidebar";
-import { AppSidebar } from "@/components/app-sidebar";
+import { DashboardShell } from "@/components/dashboard-shell";
 import { Badge } from "@/components/ui/badge";
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -20,12 +12,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar";
 import {
   formatCompactUsd,
   formatSignedUsd,
@@ -34,6 +20,8 @@ import {
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Route } from "./+types/portfolio";
+
+// ── Types ──────────────────────────────────────────────────
 
 type ReadyLoaderData = {
   accounts: Array<{
@@ -83,13 +71,13 @@ type ReadyLoaderData = {
 
 type LoaderData = { kind: "empty" } | ReadyLoaderData;
 
+// ── Helpers ────────────────────────────────────────────────
+
 function filterPortfolioAccounts(
   accounts: ReadyLoaderData["accounts"],
   query: string,
 ) {
-  if (!query) {
-    return accounts;
-  }
+  if (!query) return accounts;
 
   return accounts.flatMap((account) => {
     const accountMatches =
@@ -98,22 +86,20 @@ function filterPortfolioAccounts(
         .includes(query);
     const filteredHoldings = accountMatches
       ? account.holdings
-      : account.holdings.filter((holding) =>
-          `${holding.name} ${holding.symbol ?? ""} ${holding.assetClassLabel}`
+      : account.holdings.filter((h) =>
+          `${h.name} ${h.symbol ?? ""} ${h.assetClassLabel}`
             .toLowerCase()
             .includes(query),
         );
 
-    if (!filteredHoldings.length) {
-      return [];
-    }
+    if (!filteredHoldings.length) return [];
 
     return [
       {
         ...account,
         holdings: filteredHoldings,
         marketValueMinor: filteredHoldings.reduce(
-          (sum, holding) => sum + holding.marketValueMinor,
+          (sum, h) => sum + h.marketValueMinor,
           0,
         ),
       },
@@ -133,78 +119,58 @@ function buildAllocationBuckets(accounts: ReadyLoaderData["accounts"]) {
   >();
 
   for (const account of accounts) {
-    for (const holding of account.holdings) {
-      const existing = buckets.get(holding.assetClass) ?? {
+    for (const h of account.holdings) {
+      const existing = buckets.get(h.assetClass) ?? {
         holdingCount: 0,
-        key: holding.assetClass,
-        label: holding.assetClassLabel,
+        key: h.assetClass,
+        label: h.assetClassLabel,
         marketValueMinor: 0,
       };
-
       existing.holdingCount += 1;
-      existing.marketValueMinor += holding.marketValueMinor;
-      buckets.set(holding.assetClass, existing);
+      existing.marketValueMinor += h.marketValueMinor;
+      buckets.set(h.assetClass, existing);
     }
   }
 
   return [...buckets.values()].sort(
-    (left, right) => right.marketValueMinor - left.marketValueMinor,
+    (a, b) => b.marketValueMinor - a.marketValueMinor,
   );
 }
 
 function buildTopHoldings(accounts: ReadyLoaderData["accounts"]) {
   return accounts
-    .flatMap((account) =>
-      account.holdings.map((holding) => ({
-        accountName: account.name,
-        assetClass: holding.assetClass,
-        assetClassLabel: holding.assetClassLabel,
-        holdingId: holding.holdingId,
-        marketValueMinor: holding.marketValueMinor,
-        name: holding.name,
-        quantity: holding.quantity,
-        symbol: holding.symbol,
+    .flatMap((a) =>
+      a.holdings.map((h) => ({
+        accountName: a.name,
+        ...h,
       })),
     )
-    .sort((left, right) => right.marketValueMinor - left.marketValueMinor)
+    .sort((a, b) => b.marketValueMinor - a.marketValueMinor)
     .slice(0, 5);
 }
 
-function formatShare(marketValueMinor: number, totalMinor: number) {
-  if (totalMinor <= 0) {
-    return "0.0%";
-  }
-
-  return `${((marketValueMinor / totalMinor) * 100).toFixed(1)}%`;
+function pct(part: number, total: number) {
+  if (total <= 0) return "0%";
+  return `${((part / total) * 100).toFixed(1)}%`;
 }
 
-function MetricCard({
-  detail,
-  label,
-  value,
-}: {
-  detail: string;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-[28px] border border-border/70 bg-background/80 p-5 shadow-sm">
-      <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
-        {label}
-      </p>
-      <p className="mt-4 text-3xl font-semibold tracking-tight">{value}</p>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">{detail}</p>
-    </div>
-  );
-}
+const bucketColors: Record<string, string> = {
+  cash: "bg-emerald-400",
+  equity: "bg-primary",
+  fixed_income: "bg-sky-400",
+  fund: "bg-violet-400",
+  crypto: "bg-amber-400",
+  other: "bg-muted-foreground",
+};
+
+// ── Loader ─────────────────────────────────────────────────
 
 export function meta(_: Route.MetaArgs) {
   return [
     { title: "Vista | Portfolio" },
     {
       name: "description",
-      content:
-        "Read the current investment allocation, top holdings, and account-level portfolio breakdown.",
+      content: "Investment allocation, top holdings, and account breakdown.",
     },
   ];
 }
@@ -212,11 +178,7 @@ export function meta(_: Route.MetaArgs) {
 export async function loader({ context }: Route.LoaderArgs) {
   const snapshot = await getPortfolioSnapshot(getDb(context.cloudflare.env.DB));
 
-  if (!snapshot) {
-    return {
-      kind: "empty" as const,
-    };
-  }
+  if (!snapshot) return { kind: "empty" as const };
 
   return {
     accounts: snapshot.accounts,
@@ -230,503 +192,309 @@ export async function loader({ context }: Route.LoaderArgs) {
   };
 }
 
+// ── Page ───────────────────────────────────────────────────
+
 export function PortfolioScreen({ loaderData }: { loaderData: LoaderData }) {
   const [searchValue, setSearchValue] = useState("");
-  const normalizedSearch = searchValue.trim().toLowerCase();
+  const deferredSearch = useDeferredValue(searchValue);
+  const normalizedSearch = deferredSearch.trim().toLowerCase();
   const filteredAccounts =
     loaderData.kind === "ready"
       ? filterPortfolioAccounts(loaderData.accounts, normalizedSearch)
       : [];
-  const visibleAllocationBuckets = buildAllocationBuckets(filteredAccounts);
+  const visibleBuckets = buildAllocationBuckets(filteredAccounts);
   const visibleTopHoldings = buildTopHoldings(filteredAccounts);
-  const visibleTotalMinor = filteredAccounts.reduce(
-    (sum, account) => sum + account.marketValueMinor,
+  const visibleTotal = filteredAccounts.reduce(
+    (sum, a) => sum + a.marketValueMinor,
     0,
   );
-  const sidebarSections: AppSidebarSection[] =
-    loaderData.kind === "ready"
-      ? [
-          {
-            title: "Portfolio",
-            items: [
-              {
-                badge: "4",
-                href: "#overview",
-                isActive: true,
-                title: "Overview",
-              },
-              {
-                href: "#allocation",
-                title: "Allocation",
-              },
-              {
-                href: "#accounts",
-                title: "Accounts",
-              },
-              {
-                href: "#holdings",
-                title: "Top holdings",
-              },
-            ],
-          },
-          {
-            title: normalizedSearch ? "Matches" : "Accounts",
-            items: filteredAccounts.length
-              ? filteredAccounts.map((account) => ({
-                  badge: String(account.holdings.length),
-                  href: `#account-${account.accountId}`,
-                  title: account.name,
-                }))
-              : [
-                  {
-                    badge: "0",
-                    href: "#accounts",
-                    title: "No matching holdings",
-                  },
-                ],
-          },
-        ]
-      : [
-          {
-            title: "Setup",
-            items: [
-              {
-                href: "#overview",
-                isActive: true,
-                title: "Overview",
-              },
-            ],
-          },
-        ];
 
   return (
-    <SidebarProvider defaultOpen>
-      <AppSidebar
-        helperText={
-          loaderData.kind === "ready"
-            ? normalizedSearch
-              ? `Filtering portfolio holdings for "${searchValue}".`
-              : "Use this screen to inspect allocation, not daily movement."
-            : "Connect Plaid and run the first sync to populate holdings."
-        }
-        onSearchValueChange={setSearchValue}
-        searchDisabled={loaderData.kind === "empty"}
-        searchPlaceholder={
-          loaderData.kind === "ready"
-            ? "Search holdings, symbols, or accounts..."
-            : "Portfolio data required"
-        }
-        searchValue={searchValue}
-        sections={sidebarSections}
-        status={loaderData.kind}
-        subtitle={
-          loaderData.kind === "ready"
-            ? `Portfolio synced ${formatUpdatedAt(loaderData.lastSyncedAt)}`
-            : "No holdings imported yet"
-        }
-        summary={
-          loaderData.kind === "ready"
-            ? [
-                {
-                  label: "Invested",
-                  value: formatCompactUsd(loaderData.totals.marketValueMinor),
-                },
-                {
-                  label: "Holdings",
-                  value: String(loaderData.totals.holdingCount),
-                },
-              ]
-            : [
-                {
-                  label: "Status",
-                  value: "Awaiting holdings",
-                },
-                {
-                  label: "Next step",
-                  value: "Run sync",
-                },
-              ]
-        }
-        title={loaderData.kind === "ready" ? loaderData.householdName : "Vista"}
-      />
-      <SidebarInset className="min-h-svh bg-background">
-        <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center gap-2 border-b border-border/70 bg-background/90 px-4 backdrop-blur md:px-6">
-          <SidebarTrigger className="-ml-1" />
-          <Separator
-            orientation="vertical"
-            className="mr-2 data-vertical:h-4 data-vertical:self-auto"
-          />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem className="hidden md:block">
-                <a href="/" className="text-muted-foreground">
-                  Vista
+    <DashboardShell activePath="/portfolio">
+      <div className="space-y-6 p-5 lg:p-8">
+        {/* Header */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm text-muted-foreground">
+              {loaderData.kind === "ready"
+                ? loaderData.householdName
+                : "Portfolio"}
+            </p>
+            <h1 className="vista-display mt-1 text-3xl lg:text-4xl">
+              Investment Portfolio
+            </h1>
+          </div>
+          {loaderData.kind === "ready" ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              Synced {formatUpdatedAt(loaderData.lastSyncedAt)}
+            </div>
+          ) : null}
+        </div>
+
+        {loaderData.kind === "empty" ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+              <p className="text-lg font-medium">No holdings yet</p>
+              <p className="mt-2 max-w-sm text-sm text-muted-foreground">
+                Connect a brokerage provider to populate your portfolio view.
+              </p>
+              <div className="mt-6 flex gap-3">
+                <a href="/connect/plaid" className={buttonVariants()}>
+                  Connect Plaid
                 </a>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator className="hidden md:block" />
-              <BreadcrumbItem>
-                <BreadcrumbPage>Portfolio composition</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-        </header>
-        <main className="relative flex flex-1 flex-col overflow-hidden">
-          <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,_rgba(223,139,71,0.16),_transparent_34%),radial-gradient(circle_at_top_right,_rgba(67,125,158,0.14),_transparent_28%),linear-gradient(180deg,_rgba(255,252,247,1)_0%,_rgba(248,244,238,0.98)_58%,_rgba(243,238,232,0.94)_100%)]" />
-          <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
-            <section id="overview" className="scroll-mt-24 space-y-4">
-              <Card className="overflow-hidden border-border/70 bg-card/95 shadow-sm">
-                <CardHeader className="gap-4 border-b border-border/70 bg-[linear-gradient(135deg,_rgba(255,255,255,0.92),_rgba(246,240,232,0.9))]">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                    <div className="space-y-3">
-                      <Badge
-                        variant="outline"
-                        className="w-fit border-border/80 bg-background/80"
-                      >
-                        Portfolio composition
-                      </Badge>
-                      <div className="space-y-2">
-                        <CardTitle className="text-4xl tracking-tight sm:text-5xl">
-                          Allocation at a glance
-                        </CardTitle>
-                        <CardDescription className="max-w-3xl text-base leading-7 text-muted-foreground">
-                          Read the current mix across accounts, holdings, and
-                          asset buckets without digging through provider data.
-                        </CardDescription>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <a
-                        href="/"
-                        className={cn(
-                          buttonVariants({
-                            size: "sm",
-                            variant: "ghost",
-                          }),
-                        )}
-                      >
-                        Back to snapshot
-                      </a>
-                      <a
-                        href="/accounts/review"
-                        className={cn(
-                          buttonVariants({
-                            size: "sm",
-                            variant: "outline",
-                          }),
-                        )}
-                      >
-                        Review accounts
-                      </a>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="pt-6">
-                  {loaderData.kind === "ready" ? (
-                    <div className="grid gap-4 lg:grid-cols-4">
-                      <MetricCard
-                        label="Total invested"
-                        value={formatUsd(loaderData.totals.marketValueMinor)}
-                        detail={`As of ${loaderData.asOfDate}`}
-                      />
-                      <MetricCard
-                        label="Unrealized gain"
-                        value={formatSignedUsd(
-                          loaderData.totals.unrealizedGainMinor,
-                        )}
-                        detail={`Against ${formatUsd(loaderData.totals.costBasisMinor)} in cost basis`}
-                      />
-                      <MetricCard
-                        label="Accounts"
-                        value={String(loaderData.totals.accountCount)}
-                        detail="Brokerage and retirement accounts with active holdings."
-                      />
-                      <MetricCard
-                        label="Holdings"
-                        value={String(loaderData.totals.holdingCount)}
-                        detail="Synthetic cash plus provider positions in the latest sync."
-                      />
-                    </div>
-                  ) : (
-                    <div className="rounded-[28px] border border-dashed border-border/80 bg-background/75 p-6">
-                      <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
-                        Portfolio composition
-                      </p>
-                      <p className="mt-4 text-2xl font-semibold tracking-tight">
-                        No investment holdings yet
-                      </p>
-                      <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-                        Connect Plaid and run the first sync after saving a
-                        provider connection. Once holdings are imported, this
-                        page will show current allocation, top positions, and
-                        account-level splits.
-                      </p>
-                      <div className="mt-5 flex flex-wrap items-center gap-3">
-                        <a
-                          href="/connect/plaid"
-                          className={cn(
-                            buttonVariants({
-                              size: "sm",
-                              variant: "outline",
-                            }),
-                          )}
-                        >
-                          Connect Plaid
-                        </a>
-                        <a
-                          href="/"
-                          className={cn(
-                            buttonVariants({
-                              size: "sm",
-                              variant: "outline",
-                            }),
-                          )}
-                        >
-                          Back to snapshot
-                        </a>
-                      </div>
-                    </div>
-                  )}
+                <a
+                  href="/connect/snaptrade"
+                  className={buttonVariants({ variant: "outline" })}
+                >
+                  SnapTrade
+                </a>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            {/* Search */}
+            <div className="relative max-w-md">
+              <MagnifyingGlassIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                value={searchValue}
+                onChange={(e) => setSearchValue(e.target.value)}
+                placeholder="Search holdings, symbols, accounts..."
+                className="h-10 w-full rounded-lg border border-border/60 bg-card/60 pl-9 pr-4 text-sm outline-none placeholder:text-muted-foreground/60 focus:border-ring focus:ring-2 focus:ring-ring/30"
+              />
+            </div>
+
+            {/* Stats cards */}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                    Market value
+                  </p>
+                  <p className="vista-display mt-2 text-2xl">
+                    {formatUsd(loaderData.totals.marketValueMinor)}
+                  </p>
                 </CardContent>
               </Card>
-            </section>
-
-            {loaderData.kind === "ready" ? (
-              <>
-                <section
-                  id="allocation"
-                  className="grid scroll-mt-24 gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]"
-                >
-                  <Card className="border-border/70 bg-card/95 shadow-sm">
-                    <CardHeader className="gap-2">
-                      <CardTitle className="text-2xl tracking-tight">
-                        Asset mix
-                      </CardTitle>
-                      <CardDescription className="leading-6">
-                        The current allocation is grouped by normalized asset
-                        class so the page stays provider-agnostic above the sync
-                        layer.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      {visibleAllocationBuckets.length ? (
-                        visibleAllocationBuckets.map((bucket) => (
-                          <div
-                            key={bucket.key}
-                            className="rounded-[24px] border border-border/70 bg-background/80 p-4"
-                          >
-                            <div className="flex items-center justify-between gap-4">
-                              <div>
-                                <p className="font-medium">{bucket.label}</p>
-                                <p className="mt-1 text-sm text-muted-foreground">
-                                  {bucket.holdingCount} holding
-                                  {bucket.holdingCount === 1 ? "" : "s"}
-                                </p>
-                              </div>
-                              <div className="text-right">
-                                <p className="font-semibold">
-                                  {formatUsd(bucket.marketValueMinor)}
-                                </p>
-                                <p className="text-sm text-muted-foreground">
-                                  {formatShare(
-                                    bucket.marketValueMinor,
-                                    visibleTotalMinor,
-                                  )}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="mt-4 h-3 rounded-full bg-muted">
-                              <div
-                                className="h-full rounded-full bg-[linear-gradient(90deg,_rgba(219,126,63,0.92),_rgba(65,111,140,0.88))]"
-                                style={{
-                                  width: `${Math.max(
-                                    6,
-                                    Math.round(
-                                      (bucket.marketValueMinor /
-                                        Math.max(visibleTotalMinor, 1)) *
-                                        100,
-                                    ),
-                                  )}%`,
-                                }}
-                              />
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-sm leading-6 text-muted-foreground">
-                          No holdings match the current filter.
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  <Card
-                    id="holdings"
-                    className="border-border/70 bg-[linear-gradient(180deg,_rgba(255,255,255,0.94),_rgba(247,241,234,0.95))] shadow-sm"
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                    Cost basis
+                  </p>
+                  <p className="vista-display mt-2 text-2xl">
+                    {formatUsd(loaderData.totals.costBasisMinor)}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                    Unrealized gain
+                  </p>
+                  <p
+                    className={cn(
+                      "vista-display mt-2 text-2xl",
+                      loaderData.totals.unrealizedGainMinor >= 0
+                        ? "text-emerald-400"
+                        : "text-rose-400",
+                    )}
                   >
-                    <CardHeader className="gap-2">
-                      <CardTitle className="text-2xl tracking-tight">
-                        Top holdings
-                      </CardTitle>
-                      <CardDescription className="leading-6">
-                        Largest positions across visible accounts in the latest
-                        imported snapshot.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      {visibleTopHoldings.length ? (
-                        visibleTopHoldings.map((holding, index) => (
-                          <div
-                            key={holding.holdingId}
-                            className="rounded-[24px] border border-border/70 bg-background/85 p-4"
-                          >
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="min-w-0">
-                                <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
-                                  #{index + 1}
-                                </p>
-                                <p className="mt-2 font-medium">
-                                  {holding.name}
-                                </p>
-                                <p className="mt-1 text-sm text-muted-foreground">
-                                  {[holding.symbol, holding.accountName]
-                                    .filter(Boolean)
-                                    .join(" · ")}
-                                </p>
-                              </div>
-                              <div className="text-right">
-                                <p className="font-semibold">
-                                  {formatUsd(holding.marketValueMinor)}
-                                </p>
-                                <p className="text-sm text-muted-foreground">
-                                  {holding.quantity} units
-                                </p>
-                              </div>
-                            </div>
-                            <div className="mt-4 flex items-center justify-between gap-4">
-                              <Badge
-                                variant="outline"
-                                className="border-border/80 bg-background/80"
-                              >
-                                {holding.assetClassLabel}
-                              </Badge>
-                              <span className="text-sm text-muted-foreground">
-                                {formatShare(
-                                  holding.marketValueMinor,
-                                  visibleTotalMinor,
-                                )}{" "}
-                                of visible portfolio
-                              </span>
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-sm leading-6 text-muted-foreground">
-                          No holdings match the current filter.
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-                </section>
+                    {formatSignedUsd(loaderData.totals.unrealizedGainMinor)}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                    Holdings
+                  </p>
+                  <p className="vista-display mt-2 text-2xl">
+                    {loaderData.totals.holdingCount}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    across {loaderData.totals.accountCount} accounts
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
 
-                <section id="accounts" className="scroll-mt-24 space-y-4">
-                  <div>
-                    <h2 className="text-2xl font-semibold tracking-tight">
-                      Account sleeves
-                    </h2>
-                    <p className="text-sm leading-6 text-muted-foreground">
-                      Holdings stay grouped by account so allocation work still
-                      maps cleanly back to the imported provider structure.
-                    </p>
-                  </div>
-                  {filteredAccounts.length ? (
-                    <div className="grid gap-4 xl:grid-cols-2">
-                      {filteredAccounts.map((account) => (
-                        <Card
-                          id={`account-${account.accountId}`}
-                          key={account.accountId}
-                          className="scroll-mt-24 border-border/70 bg-card/95 shadow-sm"
-                        >
-                          <CardHeader className="gap-4">
-                            <div className="flex items-start justify-between gap-4">
-                              <div>
-                                <CardTitle className="text-xl">
-                                  {account.name}
-                                </CardTitle>
-                                <CardDescription className="mt-1 flex items-center gap-2">
-                                  <BuildingsIcon className="size-3.5" />
-                                  {account.institutionName}
-                                </CardDescription>
-                              </div>
-                              <div className="text-right">
-                                <p className="font-semibold">
-                                  {formatUsd(account.marketValueMinor)}
-                                </p>
-                                <p className="text-sm text-muted-foreground">
-                                  {account.accountType}
-                                </p>
-                              </div>
-                            </div>
-                          </CardHeader>
-                          <CardContent>
-                            <ul className="space-y-3">
-                              {account.holdings.map((holding) => (
-                                <li
-                                  key={holding.holdingId}
-                                  className="rounded-[24px] border border-border/70 bg-background/80 p-4"
-                                >
-                                  <div className="flex items-start justify-between gap-4">
-                                    <div className="min-w-0">
-                                      <p className="font-medium">
-                                        {holding.name}
-                                      </p>
-                                      <p className="mt-1 text-sm text-muted-foreground">
-                                        {[
-                                          holding.symbol,
-                                          holding.assetClassLabel,
-                                        ]
-                                          .filter(Boolean)
-                                          .join(" · ")}
-                                      </p>
-                                    </div>
-                                    <div className="text-right">
-                                      <p className="font-semibold">
-                                        {formatUsd(holding.marketValueMinor)}
-                                      </p>
-                                      <p className="text-sm text-muted-foreground">
-                                        {holding.quantity} units
-                                      </p>
-                                    </div>
-                                  </div>
-                                </li>
-                              ))}
-                            </ul>
-                          </CardContent>
-                        </Card>
+            {/* Allocation + Top holdings */}
+            <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Asset Allocation</CardTitle>
+                  <CardDescription>
+                    Portfolio breakdown by asset class
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {/* Stacked bar */}
+                  {visibleTotal > 0 ? (
+                    <div className="flex h-4 overflow-hidden rounded-full">
+                      {visibleBuckets.map((b) => (
+                        <div
+                          key={b.key}
+                          className={cn(
+                            "transition-all",
+                            bucketColors[b.key] ?? "bg-muted-foreground",
+                          )}
+                          style={{
+                            width: `${(b.marketValueMinor / visibleTotal) * 100}%`,
+                          }}
+                        />
                       ))}
                     </div>
-                  ) : (
-                    <Card className="border-border/70 bg-card/95 shadow-sm">
-                      <CardHeader className="gap-2">
-                        <CardTitle className="text-xl">
-                          No holdings match this filter
-                        </CardTitle>
-                        <CardDescription className="leading-6">
-                          Clear the sidebar search to restore the full portfolio
-                          mix.
-                        </CardDescription>
-                      </CardHeader>
-                    </Card>
-                  )}
-                </section>
-              </>
-            ) : null}
-          </div>
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
+                  ) : null}
+                  {/* Legend rows */}
+                  <div className="space-y-2 pt-2">
+                    {visibleBuckets.map((b) => (
+                      <div
+                        key={b.key}
+                        className="flex items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              "size-2.5 rounded-full",
+                              bucketColors[b.key] ?? "bg-muted-foreground",
+                            )}
+                          />
+                          <span className="text-sm">{b.label}</span>
+                          <Badge variant="outline" className="text-[10px]">
+                            {b.holdingCount}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-3 text-sm tabular-nums">
+                          <span className="text-muted-foreground">
+                            {pct(b.marketValueMinor, visibleTotal)}
+                          </span>
+                          <span className="font-medium">
+                            {formatCompactUsd(b.marketValueMinor)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Top Holdings</CardTitle>
+                  <CardDescription>Largest positions by value</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-1">
+                  {visibleTopHoldings.map((h, i) => (
+                    <div
+                      key={h.holdingId}
+                      className="flex items-center justify-between gap-3 rounded-md px-2 py-2 hover:bg-muted/30"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="flex size-7 items-center justify-center rounded-md bg-muted text-[10px] font-bold text-muted-foreground">
+                          {i + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-[13px] font-medium">
+                            {h.symbol ?? h.name}
+                          </p>
+                          <p className="truncate text-[11px] text-muted-foreground">
+                            {h.name !== (h.symbol ?? h.name)
+                              ? h.name
+                              : h.accountName}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="shrink-0 text-[13px] font-medium tabular-nums">
+                        {formatUsd(h.marketValueMinor)}
+                      </p>
+                    </div>
+                  ))}
+                  {visibleTopHoldings.length === 0 ? (
+                    <p className="py-4 text-center text-sm text-muted-foreground">
+                      No holdings match filter
+                    </p>
+                  ) : null}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Account sleeves */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Account Sleeves</CardTitle>
+                <CardDescription>Holdings grouped by account</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {filteredAccounts.map((account) => (
+                  <div
+                    key={account.accountId}
+                    className="rounded-lg border border-border/60 bg-card/40"
+                  >
+                    <div className="flex items-center justify-between gap-4 border-b border-border/40 px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium">{account.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {account.institutionName} · {account.accountType}
+                        </p>
+                      </div>
+                      <p className="text-sm font-semibold tabular-nums">
+                        {formatUsd(account.marketValueMinor)}
+                      </p>
+                    </div>
+                    <div className="divide-y divide-border/30">
+                      {account.holdings.map((h) => (
+                        <div
+                          key={h.holdingId}
+                          className="flex items-center justify-between gap-4 px-4 py-2.5"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="truncate text-[13px]">
+                                {h.symbol ?? h.name}
+                              </p>
+                              <Badge
+                                variant="outline"
+                                className="shrink-0 text-[10px]"
+                              >
+                                {h.assetClassLabel}
+                              </Badge>
+                            </div>
+                            {h.symbol ? (
+                              <p className="truncate text-[11px] text-muted-foreground">
+                                {h.name}
+                              </p>
+                            ) : null}
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[13px] font-medium tabular-nums">
+                              {formatUsd(h.marketValueMinor)}
+                            </p>
+                            <p className="text-[11px] text-muted-foreground tabular-nums">
+                              {h.quantity} shares
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {filteredAccounts.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-muted-foreground">
+                    {normalizedSearch
+                      ? "No accounts match this search"
+                      : "No accounts available"}
+                  </p>
+                ) : null}
+              </CardContent>
+            </Card>
+          </>
+        )}
+      </div>
+    </DashboardShell>
   );
 }
 
-export default function PortfolioRoute({ loaderData }: Route.ComponentProps) {
-  return <PortfolioScreen loaderData={loaderData as LoaderData} />;
+export default function Portfolio({ loaderData }: Route.ComponentProps) {
+  return <PortfolioScreen loaderData={loaderData} />;
 }

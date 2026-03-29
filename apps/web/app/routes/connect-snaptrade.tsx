@@ -2,6 +2,7 @@ import { ArrowSquareOutIcon, ShieldCheckIcon } from "@phosphor-icons/react";
 import { createSnaptradePortalClient } from "@vista/snaptrade";
 import { Form, redirect, useActionData, useNavigation } from "react-router";
 
+import { DashboardShell } from "@/components/dashboard-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -94,8 +95,8 @@ export default function ConnectSnaptrade() {
   const isSubmitting = navigation.state === "submitting";
 
   return (
-    <main className="min-h-screen bg-background px-4 py-10 md:px-6">
-      <div className="mx-auto flex max-w-5xl flex-col gap-6">
+    <DashboardShell activePath="/connect/snaptrade">
+      <div className="mx-auto flex max-w-5xl flex-col gap-6 p-5 lg:p-8">
         <Card className="border-border/70 bg-card/95 shadow-sm">
           <CardHeader className="gap-4">
             <div className="space-y-3">
@@ -198,6 +199,6 @@ export default function ConnectSnaptrade() {
           </CardContent>
         </Card>
       </div>
-    </main>
+    </DashboardShell>
   );
 }

@@ -98,9 +98,12 @@ describe("Home route", () => {
 
     const html = renderToStaticMarkup(<Home {...props} />);
 
+    expect(html).toContain("Welcome back");
+    expect(html).toContain("Vista Household");
     expect(html).toContain("Net Worth");
-    expect(html).toContain("$455.7K");
+    expect(html).toContain("$455,743.10");
     expect(html).toContain("+$3,743.10");
+    expect(html).toContain("Connections");
     expect(html).toContain("Portfolio");
     expect(html).toContain("Cash");
     expect(html).toContain("Investments");
@@ -247,13 +250,11 @@ describe("Home route", () => {
     const html = renderToStaticMarkup(<Home {...props} />);
 
     expect(html).toContain("Accounts");
-    expect(html).toContain(">2<");
+    expect(html).toContain("2 accounts tracked");
     expect(html).toContain("Cash Pocket");
     expect(html).toContain("Starter Fund");
-    expect(html).toContain(
-      "Using current account balances while the first sync comes online",
-    );
-    expect(html).toContain("Needs attention");
+    expect(html).toContain("Chart available after multiple syncs");
+    expect(html).toContain("Error");
   });
 
   test("renders the seeded empty state when no household snapshot exists", () => {
@@ -269,7 +270,9 @@ describe("Home route", () => {
     const html = renderToStaticMarkup(<Home {...props} />);
 
     expect(html).toContain("Welcome to Vista");
-    expect(html).toContain("bun run db:seed:local");
+    expect(html).toContain(
+      "Connect your first financial provider to build your household snapshot.",
+    );
     expect(html).toContain("/connect/plaid");
     expect(html).toContain("/connect/simplefin");
     expect(html).toContain("/connect/snaptrade");
