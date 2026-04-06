@@ -60,11 +60,13 @@ else
     fi
 fi
 
+DEV_HOST=${VISTA_DEV_HOST:-127.0.0.1}
+
 echo "[dev] Vista worktree environment"
 echo "[dev] Worktree: $WORKTREE_PATH"
 echo "[dev] Main:     $MAIN_WORKTREE"
-echo "[dev] Web:      http://127.0.0.1:$WEB_PORT"
-echo "[dev] Sync:     http://127.0.0.1:$SYNC_PORT"
+echo "[dev] Web:      http://$DEV_HOST:$WEB_PORT"
+echo "[dev] Sync:     http://$DEV_HOST:$SYNC_PORT"
 
 if [ "$WORKTREE_PATH" != "$MAIN_WORKTREE" ] && [ ! -f "$SEEDED_MARKER" ] && [ -d "$MAIN_WORKTREE/$STATE_DIR" ]; then
     echo "[dev] Seeding local worker state from main worktree"
@@ -92,6 +94,7 @@ fi
 
 export VISTA_WEB_PORT=$WEB_PORT
 export VISTA_SYNC_PORT=$SYNC_PORT
+export VISTA_DEV_HOST=$DEV_HOST
 
 echo ""
 echo "[dev] Starting services"

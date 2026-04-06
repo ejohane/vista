@@ -30,7 +30,7 @@ Start the development server with HMR:
 npm run dev
 ```
 
-Your application will be available at `http://localhost:5173`.
+Your application will be available at `http://127.0.0.1:5173` by default, or at `http://$VISTA_DEV_HOST:$VISTA_WEB_PORT` when those environment variables are set.
 
 ## Previewing the Production Build
 

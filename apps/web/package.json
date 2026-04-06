@@ -6,7 +6,7 @@
     "build": "react-router build",
     "cf-typegen": "wrangler types",
     "deploy": "bun run build && wrangler deploy",
-    "dev": "react-router dev --host 127.0.0.1 --port 5173 --strictPort",
+    "dev": "bun run ../../scripts/dev-web.ts",
     "postinstall": "bun run cf-typegen",
     "preview": "bun run build && vite preview",
     "typecheck": "bun run cf-typegen && react-router typegen && tsc -b"

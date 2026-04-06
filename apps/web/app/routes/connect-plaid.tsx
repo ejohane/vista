@@ -55,11 +55,29 @@ type PlaidLinkHandler = {
   open: () => void;
 };
 
+const PLAID_OAUTH_TOKEN_STORAGE_KEY = "plaid-oauth-link-token";
+
 type PlaidLinkMetadata = {
   institution: null | {
     institution_id: null | string;
     name: null | string;
   };
+  link_session_id?: null | string;
+};
+
+type PlaidLinkExitMetadata = PlaidLinkMetadata & {
+  request_id?: null | string;
+  status?: null | string;
+};
+
+type PlaidLinkEventMetadata = {
+  error_code?: null | string;
+  error_message?: null | string;
+  error_type?: null | string;
+  institution_id?: null | string;
+  institution_name?: null | string;
+  link_session_id?: null | string;
+  request_id?: null | string;
 };
 
 declare global {
@@ -67,9 +85,17 @@ declare global {
     Plaid?: {
       create: (config: {
         onExit?: (
-          error: null | { display_message?: string; error_message?: string },
+          error: null | {
+            display_message?: string;
+            error_code?: string;
+            error_message?: string;
+            error_type?: string;
+          },
+          metadata: PlaidLinkExitMetadata,
         ) => void;
+        onEvent?: (eventName: string, metadata: PlaidLinkEventMetadata) => void;
         onSuccess: (publicToken: string, metadata: PlaidLinkMetadata) => void;
+        receivedRedirectUri?: string;
         token: string;
       }) => PlaidLinkHandler;
     };
@@ -78,12 +104,58 @@ declare global {
 
 function readOptionalEnvString(
   env: unknown,
-  key: "PLAID_CLIENT_ID" | "PLAID_ENV" | "PLAID_SECRET",
+  key: "PLAID_CLIENT_ID" | "PLAID_ENV" | "PLAID_REDIRECT_URI" | "PLAID_SECRET",
 ) {
   const record = env as Record<string, unknown>;
   const value = record[key];
 
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function buildPlaidRedirectUrl(args: {
+  configuredRedirectUrl?: string;
+  requestUrl: string;
+}) {
+  if (args.configuredRedirectUrl) {
+    return args.configuredRedirectUrl;
+  }
+
+  const url = new URL(args.requestUrl);
+
+  if (url.protocol !== "https:") {
+    return undefined;
+  }
+
+  url.hash = "";
+  url.search = "";
+
+  return url.toString();
+}
+
+function clearPlaidOAuthState() {
+  try {
+    window.sessionStorage.removeItem(PLAID_OAUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures so Plaid cleanup does not break the page.
+  }
+
+  const currentUrl = new URL(window.location.href);
+
+  if (!currentUrl.searchParams.has("oauth_state_id")) {
+    return;
+  }
+
+  currentUrl.hash = "";
+  currentUrl.search = "";
+  window.history.replaceState({}, document.title, currentUrl.toString());
+}
+
+function persistPlaidOAuthToken(linkToken: string) {
+  try {
+    window.sessionStorage.setItem(PLAID_OAUTH_TOKEN_STORAGE_KEY, linkToken);
+  } catch {
+    // Ignore storage failures; Plaid desktop flows can still proceed.
+  }
 }
 
 export function createConnectPlaidAction(deps?: {
@@ -207,8 +279,10 @@ export function createConnectPlaidLoader(deps?: {
 
   return async function loader({
     context,
+    request,
   }: {
     context: { cloudflare: { env: Env } };
+    request: Request;
   }): Promise<LoaderData> {
     const clientId = readOptionalEnvString(
       context.cloudflare.env,
@@ -222,6 +296,10 @@ export function createConnectPlaidLoader(deps?: {
       context.cloudflare.env,
       "PLAID_ENV",
     ) as "development" | "production" | "sandbox" | undefined;
+    const configuredRedirectUrl = readOptionalEnvString(
+      context.cloudflare.env,
+      "PLAID_REDIRECT_URI",
+    );
 
     if (!clientId || !secret) {
       return buildLoaderErrorData(
@@ -235,6 +313,10 @@ export function createConnectPlaidLoader(deps?: {
         clientId,
         database: context.cloudflare.env.DB,
         environment,
+        redirectUrl: buildPlaidRedirectUrl({
+          configuredRedirectUrl,
+          requestUrl: request.url,
+        }),
         secret,
       });
 
@@ -278,6 +360,30 @@ export default function ConnectPlaid() {
   const handlerRef = useRef<null | PlaidLinkHandler>(null);
   const hasAutoOpenedRef = useRef(false);
   const isSubmitting = navigation.state === "submitting";
+  const [oauthRedirectUri, setOauthRedirectUri] = useState<null | string>(null);
+  const [oauthResumeToken, setOauthResumeToken] = useState<null | string>(null);
+
+  useEffect(() => {
+    const currentUrl = new URL(window.location.href);
+
+    if (!currentUrl.searchParams.has("oauth_state_id")) {
+      return;
+    }
+
+    setOauthRedirectUri(currentUrl.toString());
+
+    try {
+      const savedToken = window.sessionStorage.getItem(
+        PLAID_OAUTH_TOKEN_STORAGE_KEY,
+      );
+
+      if (savedToken?.trim()) {
+        setOauthResumeToken(savedToken);
+      }
+    } catch {
+      // Ignore storage failures and fall back to the fresh loader token.
+    }
+  }, []);
 
   useEffect(() => {
     if (loaderData.kind !== "ready") {
@@ -333,12 +439,53 @@ export default function ConnectPlaid() {
     }
 
     handlerRef.current = window.Plaid.create({
-      onExit(error) {
-        if (error?.display_message || error?.error_message) {
-          setLinkError(error.display_message ?? error.error_message ?? null);
+      onEvent(eventName, metadata) {
+        if (
+          eventName === "ERROR" ||
+          eventName === "FAIL_OAUTH" ||
+          eventName === "CLOSE_OAUTH"
+        ) {
+          console.error("Plaid Link event", {
+            errorCode: metadata.error_code ?? null,
+            errorMessage: metadata.error_message ?? null,
+            errorType: metadata.error_type ?? null,
+            eventName,
+            institutionId: metadata.institution_id ?? null,
+            institutionName: metadata.institution_name ?? null,
+            linkSessionId: metadata.link_session_id ?? null,
+            requestId: metadata.request_id ?? null,
+          });
         }
       },
+      onExit(error, metadata) {
+        if (error?.display_message || error?.error_message) {
+          const requestIdSuffix = metadata.request_id
+            ? ` Request ID: ${metadata.request_id}.`
+            : "";
+
+          setLinkError(
+            `${error.display_message ?? error.error_message ?? "Plaid exited with an error."}${requestIdSuffix}`,
+          );
+          console.error("Plaid Link exit", {
+            errorCode: error.error_code ?? null,
+            errorMessage: error.error_message ?? null,
+            errorType: error.error_type ?? null,
+            institutionId: metadata.institution?.institution_id ?? null,
+            institutionName: metadata.institution?.name ?? null,
+            linkSessionId: metadata.link_session_id ?? null,
+            requestId: metadata.request_id ?? null,
+            status: metadata.status ?? null,
+          });
+        }
+
+        clearPlaidOAuthState();
+        setOauthRedirectUri(null);
+        setOauthResumeToken(null);
+      },
       onSuccess(publicToken, metadata) {
+        clearPlaidOAuthState();
+        setOauthRedirectUri(null);
+        setOauthResumeToken(null);
         setLinkError(null);
         const formData = new FormData();
         formData.set("publicToken", publicToken);
@@ -356,14 +503,15 @@ export default function ConnectPlaid() {
 
         submit(formData, { method: "post" });
       },
-      token: loaderData.linkToken,
+      receivedRedirectUri: oauthRedirectUri ?? undefined,
+      token: oauthResumeToken ?? loaderData.linkToken,
     });
 
     return () => {
       handlerRef.current?.destroy();
       handlerRef.current = null;
     };
-  }, [loaderData, linkState, submit]);
+  }, [loaderData, linkState, oauthRedirectUri, oauthResumeToken, submit]);
 
   useEffect(() => {
     if (
@@ -376,11 +524,21 @@ export default function ConnectPlaid() {
     }
 
     hasAutoOpenedRef.current = true;
+
+    if (!oauthRedirectUri) {
+      persistPlaidOAuthToken(loaderData.linkToken);
+    }
+
     handlerRef.current.open();
-  }, [loaderData, linkState]);
+  }, [loaderData, linkState, oauthRedirectUri]);
 
   function openPlaidLink() {
     setLinkError(null);
+
+    if (loaderData.kind === "ready" && !oauthRedirectUri) {
+      persistPlaidOAuthToken(loaderData.linkToken);
+    }
+
     handlerRef.current?.open();
   }
 
