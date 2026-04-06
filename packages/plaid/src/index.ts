@@ -68,6 +68,7 @@ export type PlaidClient = {
     countryCodes?: string[];
     language?: string;
     products: string[];
+    requiredIfSupportedProducts?: string[];
     redirectUri?: string;
     userId: string;
   }): Promise<{
@@ -288,6 +289,7 @@ export function createPlaidClient(
           country_codes: args.countryCodes ?? ["US"],
           language: args.language ?? "en",
           products: args.products,
+          required_if_supported_products: args.requiredIfSupportedProducts,
           redirect_uri: args.redirectUri,
           user: {
             client_user_id: args.userId,

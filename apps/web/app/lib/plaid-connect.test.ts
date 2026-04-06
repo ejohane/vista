@@ -3,7 +3,10 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { exchangePlaidPublicToken } from "./plaid-connect";
+import {
+  createPlaidLinkToken,
+  exchangePlaidPublicToken,
+} from "./plaid-connect";
 
 class FakeD1PreparedStatement {
   constructor(
@@ -76,6 +79,47 @@ function createWebTestDatabase() {
 }
 
 describe("exchangePlaidPublicToken", () => {
+  test("creates a link token with investment-only required products", async () => {
+    const { d1 } = createWebTestDatabase();
+    const createLinkTokenCalls: Array<Record<string, unknown>> = [];
+
+    const result = await createPlaidLinkToken({
+      client: {
+        createLinkToken: async (args) => {
+          createLinkTokenCalls.push(args as Record<string, unknown>);
+
+          return {
+            expiration: "2026-03-27T00:00:00.000Z",
+            linkToken: "link-sandbox-456",
+          };
+        },
+        exchangePublicToken: async () => {
+          throw new Error("exchangePublicToken should not be called");
+        },
+        getAccounts: async () => {
+          throw new Error("getAccounts should not be called");
+        },
+      },
+      database: d1,
+      now: new Date("2026-03-26T21:00:00.000Z"),
+    });
+
+    expect(result).toEqual({
+      householdId: "household_default",
+      householdWasCreated: true,
+      linkToken: "link-sandbox-456",
+    });
+    expect(createLinkTokenCalls).toEqual([
+      {
+        countryCodes: undefined,
+        products: ["investments"],
+        redirectUri: undefined,
+        requiredIfSupportedProducts: ["transactions", "liabilities"],
+        userId: "household_default",
+      },
+    ]);
+  });
+
   test("exchanges the public token, creates a household, and stores the Plaid connection", async () => {
     const { d1, sqlite } = createWebTestDatabase();
 

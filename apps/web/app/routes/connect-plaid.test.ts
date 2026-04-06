@@ -29,6 +29,7 @@ describe("connect plaid route loader", () => {
           },
         },
       },
+      request: new Request("http://localhost/connect/plaid"),
     } as never);
 
     expect(result).toEqual({
@@ -41,6 +42,45 @@ describe("connect plaid route loader", () => {
         database: {} as D1Database,
         environment: "sandbox",
         secret: "secret-demo",
+      }),
+    );
+  });
+
+  test("passes a redirect url for https Plaid OAuth flows", async () => {
+    const createLinkTokenMock = mock(async () => {
+      return {
+        householdId: "household_default",
+        householdWasCreated: true,
+        linkToken: "link-sandbox-102",
+      };
+    });
+    const loader = createConnectPlaidLoader({
+      createPlaidLinkToken: createLinkTokenMock,
+    });
+
+    const result = await loader({
+      context: {
+        cloudflare: {
+          env: {
+            DB: {} as D1Database,
+            PLAID_CLIENT_ID: "client-demo",
+            PLAID_ENV: "production",
+            PLAID_SECRET: "secret-demo",
+          },
+        },
+      },
+      request: new Request(
+        "https://vista.example/connect/plaid?oauth_state_id=demo",
+      ),
+    } as never);
+
+    expect(result).toEqual({
+      kind: "ready",
+      linkToken: "link-sandbox-102",
+    });
+    expect(createLinkTokenMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        redirectUrl: "https://vista.example/connect/plaid",
       }),
     );
   });
@@ -60,6 +100,7 @@ describe("connect plaid route loader", () => {
           },
         },
       },
+      request: new Request("http://localhost/connect/plaid"),
     } as never);
 
     expect(result).toEqual({

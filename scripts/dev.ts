@@ -28,7 +28,6 @@ const syncWranglerBin = path.join(
   ".bin",
   process.platform === "win32" ? "wrangler.cmd" : "wrangler",
 );
-const host = "127.0.0.1";
 const defaultWebPort = 5173;
 const defaultSyncPort = 8788;
 const shouldSkipSeed =
@@ -39,11 +38,31 @@ const commandEnv = {
   ...localEnv,
   ...process.env,
 };
+const host = commandEnv.VISTA_DEV_HOST?.trim() || "127.0.0.1";
 
 type RunningProcess = {
   label: string;
   process: Bun.Subprocess<"ignore", "inherit", "inherit">;
 };
+
+function resolveLocalHttpsRedirectUrl(env: Record<string, string | undefined>) {
+  const redirectUrlValue = env.PLAID_REDIRECT_URI?.trim();
+
+  if (!redirectUrlValue) {
+    return null;
+  }
+
+  const redirectUrl = new URL(redirectUrlValue);
+
+  if (
+    redirectUrl.protocol !== "https:" ||
+    !redirectUrl.hostname.endsWith(".ts.net")
+  ) {
+    return null;
+  }
+
+  return redirectUrl;
+}
 
 function logStep(message: string) {
   console.log(`\n[dev] ${message}`);
@@ -179,6 +198,7 @@ async function main() {
     host,
     label: "sync",
   });
+  const plaidRedirectUrl = resolveLocalHttpsRedirectUrl(commandEnv);
 
   logStep("Starting development services");
   if (webPort.usedFallback) {
@@ -193,6 +213,9 @@ async function main() {
   }
   console.log(`[dev] Web:  http://${host}:${webPort.port}`);
   console.log(`[dev] Sync: http://${host}:${syncPort.port}`);
+  if (plaidRedirectUrl) {
+    console.log(`[dev] Plaid HTTPS: ${plaidRedirectUrl.toString()}`);
+  }
 
   const services = [
     spawnService(
@@ -214,6 +237,8 @@ async function main() {
         syncWranglerBin,
         "dev",
         "--test-scheduled",
+        "--ip",
+        host,
         "--port",
         String(syncPort.port),
         "--persist-to",
@@ -222,6 +247,12 @@ async function main() {
       syncAppDir,
     ),
   ];
+
+  if (plaidRedirectUrl) {
+    services.push(
+      spawnService("plaid-https", ["bun", "run", "scripts/dev-https-proxy.ts"]),
+    );
+  }
 
   let shuttingDown = false;
 

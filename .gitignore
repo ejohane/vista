@@ -13,3 +13,4 @@ coverage
 .env.*.local
 .dev.vars
 .dev.vars.*
+.tailscale/
