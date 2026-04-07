@@ -2,17 +2,10 @@ import { getDashboardSnapshot, getDb } from "@vista/db";
 
 import { ingestDemoSyncBatch } from "./fixture-sync";
 import { syncConfiguredPlaidConnections } from "./plaid-sync";
-import { syncConfiguredSimplefinConnections } from "./simplefin-sync";
-import { syncConfiguredSnaptradeConnections } from "./snaptrade-sync";
 
 function readOptionalEnvString(
   env: Env,
-  key:
-    | "PLAID_CLIENT_ID"
-    | "PLAID_ENV"
-    | "PLAID_SECRET"
-    | "SNAPTRADE_CLIENT_ID"
-    | "SNAPTRADE_CONSUMER_KEY",
+  key: "PLAID_CLIENT_ID" | "PLAID_ENV" | "PLAID_SECRET",
 ) {
   const value = (env as Env & Record<string, unknown>)[key];
 
@@ -45,15 +38,12 @@ async function hasConfiguredProviderConnection(env: Env) {
       select id
       from provider_connections
       where status = ?
-        and (
-          (provider = ? and access_url is not null)
-          or (provider = ? and access_secret is not null)
-          or (provider = ? and access_token is not null)
-        )
+        and provider = ?
+        and access_token is not null
       limit 1
     `,
   )
-    .bind("active", "simplefin", "snaptrade", "plaid")
+    .bind("active", "plaid")
     .first<{ id: string }>();
 
   return configuredConnection !== null;
@@ -90,19 +80,7 @@ export default {
           | undefined) ?? undefined,
       secret: readOptionalEnvString(env, "PLAID_SECRET"),
     });
-    const simplefinResults = await syncConfiguredSimplefinConnections({
-      database: env.DB,
-    });
-    const snaptradeResults = await syncConfiguredSnaptradeConnections({
-      clientId: readOptionalEnvString(env, "SNAPTRADE_CLIENT_ID"),
-      consumerKey: readOptionalEnvString(env, "SNAPTRADE_CONSUMER_KEY"),
-      database: env.DB,
-    });
-    const syncResults = [
-      ...plaidResults,
-      ...simplefinResults,
-      ...snaptradeResults,
-    ];
+    const syncResults = [...plaidResults];
     const ingestResult =
       !hasConfiguredConnections && syncResults.length === 0
         ? await ingestDemoSyncBatch(env.DB)

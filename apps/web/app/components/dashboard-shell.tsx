@@ -1,5 +1,4 @@
 import {
-  ArrowsClockwiseIcon,
   ChartLineUpIcon,
   DatabaseIcon,
   GearSixIcon,
@@ -26,8 +25,6 @@ const mainNav: NavItem[] = [
 
 const connectNav: NavItem[] = [
   { href: "/connect/plaid", icon: DatabaseIcon, label: "Plaid" },
-  { href: "/connect/simplefin", icon: ListIcon, label: "SimpleFIN" },
-  { href: "/connect/snaptrade", icon: ArrowsClockwiseIcon, label: "SnapTrade" },
 ];
 
 function isActive(activePath: string, href: string) {

@@ -14,28 +14,12 @@ describe("Home route", () => {
         },
         connectionStates: [
           {
-            configuredConnectionCount: 0,
-            lastSuccessfulSyncAt: null,
-            latestRunAt: null,
-            latestRunStatus: "never",
-            provider: "plaid",
-            status: "not_connected",
-          },
-          {
             configuredConnectionCount: 1,
             lastSuccessfulSyncAt: "2026-03-16T18:30:00.000Z",
             latestRunAt: "2026-03-16T18:30:00.000Z",
             latestRunStatus: "succeeded",
-            provider: "simplefin",
+            provider: "plaid",
             status: "active",
-          },
-          {
-            configuredConnectionCount: 0,
-            lastSuccessfulSyncAt: null,
-            latestRunAt: null,
-            latestRunStatus: "never",
-            provider: "snaptrade",
-            status: "not_connected",
           },
         ],
         hasSuccessfulSync: true,
@@ -110,15 +94,10 @@ describe("Home route", () => {
     expect(html).toContain("Everyday Checking");
     expect(html).toContain("Taxable Brokerage");
     expect(html).toContain("Plaid");
-    expect(html).toContain("SimpleFIN");
-    expect(html).toContain("SnapTrade");
     expect(html).toContain("Connected");
-    expect(html).toContain("Not connected");
     expect(html).toContain("/accounts/review");
     expect(html).toContain("/portfolio");
     expect(html).toContain("/connect/plaid");
-    expect(html).toContain("/connect/simplefin");
-    expect(html).toContain("/connect/snaptrade");
   });
 
   test("renders chart pending copy when history has fewer than two points", () => {
@@ -127,28 +106,12 @@ describe("Home route", () => {
         changeSummary: null,
         connectionStates: [
           {
-            configuredConnectionCount: 0,
-            lastSuccessfulSyncAt: null,
-            latestRunAt: null,
-            latestRunStatus: "never",
-            provider: "plaid",
-            status: "not_connected",
-          },
-          {
             configuredConnectionCount: 1,
             lastSuccessfulSyncAt: "2026-03-17T18:30:00.000Z",
             latestRunAt: "2026-03-17T18:30:00.000Z",
             latestRunStatus: "succeeded",
-            provider: "simplefin",
+            provider: "plaid",
             status: "active",
-          },
-          {
-            configuredConnectionCount: 0,
-            lastSuccessfulSyncAt: null,
-            latestRunAt: null,
-            latestRunStatus: "never",
-            provider: "snaptrade",
-            status: "not_connected",
           },
         ],
         hasSuccessfulSync: true,
@@ -192,22 +155,6 @@ describe("Home route", () => {
             latestRunAt: null,
             latestRunStatus: "never",
             provider: "plaid",
-            status: "not_connected",
-          },
-          {
-            configuredConnectionCount: 0,
-            lastSuccessfulSyncAt: null,
-            latestRunAt: null,
-            latestRunStatus: "never",
-            provider: "simplefin",
-            status: "not_connected",
-          },
-          {
-            configuredConnectionCount: 0,
-            lastSuccessfulSyncAt: null,
-            latestRunAt: null,
-            latestRunStatus: "never",
-            provider: "snaptrade",
             status: "error",
           },
         ],
@@ -274,7 +221,5 @@ describe("Home route", () => {
       "Connect your first financial provider to build your household snapshot.",
     );
     expect(html).toContain("/connect/plaid");
-    expect(html).toContain("/connect/simplefin");
-    expect(html).toContain("/connect/snaptrade");
   });
 });

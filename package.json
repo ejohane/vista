@@ -26,7 +26,7 @@
     "prepare": "bun run scripts/setup-hooks.ts",
     "precommit": "bun run lint && bun run typecheck && bun run test",
     "test": "bun test",
-    "typecheck": "bun run --cwd packages/db typecheck && bun run --cwd packages/simplefin typecheck && bun run --cwd packages/snaptrade typecheck && bun run --cwd packages/plaid typecheck && bun run --cwd apps/sync typecheck && bun run --cwd apps/web typecheck"
+    "typecheck": "bun run --cwd packages/db typecheck && bun run --cwd packages/plaid typecheck && bun run --cwd apps/sync typecheck && bun run --cwd apps/web typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.1.4",

@@ -23,28 +23,34 @@ INSERT INTO provider_connections (
   `provider`,
   `status`,
   `external_connection_id`,
-  `access_secret`,
+  `access_token`,
+  `institution_name`,
+  `plaid_item_id`,
   `created_at`,
   `updated_at`
 )
 VALUES
   (
-    'conn_simplefin_us_bank',
+    'conn_plaid_us_bank',
     'household_demo',
-    'simplefin',
+    'plaid',
     'active',
-    'simplefin-demo-connection',
-    NULL,
+    'plaid-demo-us-bank',
+    'plaid-access-token-us-bank',
+    'US Bank',
+    'plaid-item-us-bank',
     CAST(strftime('%s', '2026-03-15 12:00:00') AS INTEGER) * 1000,
     CAST(strftime('%s', '2026-03-16 18:30:00') AS INTEGER) * 1000
   ),
   (
-    'conn_snaptrade_vanguard',
+    'conn_plaid_vanguard',
     'household_demo',
-    'snaptrade',
+    'plaid',
     'active',
-    'snaptrade-demo-connection',
-    'snaptrade-demo-user-secret',
+    'plaid-demo-vanguard',
+    'plaid-access-token-vanguard',
+    'Vanguard',
+    'plaid-item-vanguard',
     CAST(strftime('%s', '2026-03-15 12:00:00') AS INTEGER) * 1000,
     CAST(strftime('%s', '2026-03-16 18:30:00') AS INTEGER) * 1000
   );
@@ -64,8 +70,8 @@ INSERT INTO provider_accounts (
 VALUES
   (
     'prov_acct_checking',
-    'conn_simplefin_us_bank',
-    'simplefin-account-checking',
+    'conn_plaid_us_bank',
+    'plaid-account-checking',
     'US Bank Platinum Checking',
     'US Bank',
     'checking',
@@ -76,8 +82,8 @@ VALUES
   ),
   (
     'prov_acct_savings',
-    'conn_simplefin_us_bank',
-    'simplefin-account-savings',
+    'conn_plaid_us_bank',
+    'plaid-account-savings',
     'US Bank Savings',
     'US Bank',
     'savings',
@@ -88,8 +94,8 @@ VALUES
   ),
   (
     'prov_acct_brokerage',
-    'conn_snaptrade_vanguard',
-    'snaptrade-account-brokerage',
+    'conn_plaid_vanguard',
+    'plaid-account-brokerage',
     'Vanguard Taxable Brokerage',
     'Vanguard',
     'brokerage',
@@ -100,8 +106,8 @@ VALUES
   ),
   (
     'prov_acct_retirement',
-    'conn_snaptrade_vanguard',
-    'snaptrade-account-retirement',
+    'conn_plaid_vanguard',
+    'plaid-account-retirement',
     'Vanguard Rollover IRA',
     'Vanguard',
     'retirement',

@@ -262,8 +262,8 @@ export function AccountReviewScreen({
                 Connect a provider or seed local data first.
               </p>
               <div className="mt-6 flex gap-3">
-                <a href="/connect/simplefin" className={buttonVariants()}>
-                  Connect SimpleFIN
+                <a href="/connect/plaid" className={buttonVariants()}>
+                  Connect Plaid
                 </a>
                 <a href="/" className={buttonVariants({ variant: "outline" })}>
                   Back to overview
