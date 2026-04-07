@@ -236,17 +236,11 @@ export function PortfolioScreen({ loaderData }: { loaderData: LoaderData }) {
             <CardContent className="flex flex-col items-center justify-center py-16 text-center">
               <p className="text-lg font-medium">No holdings yet</p>
               <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-                Connect a brokerage provider to populate your portfolio view.
+                Connect Plaid to populate your portfolio view.
               </p>
               <div className="mt-6 flex gap-3">
                 <a href="/connect/plaid" className={buttonVariants()}>
                   Connect Plaid
-                </a>
-                <a
-                  href="/connect/snaptrade"
-                  className={buttonVariants({ variant: "outline" })}
-                >
-                  SnapTrade
                 </a>
               </div>
             </CardContent>

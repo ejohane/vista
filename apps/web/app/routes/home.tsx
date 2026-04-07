@@ -204,16 +204,20 @@ function NetWorthChart({ history }: { history: NetWorthHistoryPoint[] }) {
 
 const providerMeta = {
   plaid: { name: "Plaid", href: "/connect/plaid" },
-  simplefin: { name: "SimpleFIN", href: "/connect/simplefin" },
-  snaptrade: { name: "SnapTrade", href: "/connect/snaptrade" },
 } as const;
+
+function isSupportedProvider(
+  provider: string,
+): provider is keyof typeof providerMeta {
+  return provider in providerMeta;
+}
 
 type ConnectionState = {
   configuredConnectionCount: number;
   lastSuccessfulSyncAt: null | string;
   latestRunAt: null | string;
   latestRunStatus: "failed" | "never" | "running" | "succeeded";
-  provider: "plaid" | "simplefin" | "snaptrade";
+  provider: string;
   status: "active" | "disconnected" | "error" | "not_connected";
 };
 
@@ -233,6 +237,10 @@ function statusOf(s: ConnectionState) {
 }
 
 function ProviderRow({ state }: { state: ConnectionState }) {
+  if (!isSupportedProvider(state.provider)) {
+    return null;
+  }
+
   const provider = providerMeta[state.provider];
   const st = statusOf(state);
 
@@ -277,11 +285,13 @@ export async function loader({ context }: Route.LoaderArgs) {
   return {
     kind: "ready" as const,
     changeSummary: snapshot.changeSummary,
-    connectionStates: snapshot.connectionStates.map((state) => ({
-      ...state,
-      lastSuccessfulSyncAt: state.lastSuccessfulSyncAt?.toISOString() ?? null,
-      latestRunAt: state.latestRunAt?.toISOString() ?? null,
-    })),
+    connectionStates: snapshot.connectionStates
+      .filter((state) => isSupportedProvider(state.provider))
+      .map((state) => ({
+        ...state,
+        lastSuccessfulSyncAt: state.lastSuccessfulSyncAt?.toISOString() ?? null,
+        latestRunAt: state.latestRunAt?.toISOString() ?? null,
+      })),
     hasSuccessfulSync: snapshot.hasSuccessfulSync,
     history: snapshot.history,
     householdName: snapshot.householdName,
@@ -310,18 +320,6 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
               <a href="/connect/plaid" className={buttonVariants()}>
                 Connect Plaid
-              </a>
-              <a
-                href="/connect/simplefin"
-                className={buttonVariants({ variant: "outline" })}
-              >
-                SimpleFIN
-              </a>
-              <a
-                href="/connect/snaptrade"
-                className={buttonVariants({ variant: "outline" })}
-              >
-                SnapTrade
               </a>
             </div>
           </div>

@@ -715,10 +715,10 @@ describe("getHomepageSnapshot", () => {
     const { db, sqlite } = createTestDb();
 
     insertProviderConnection(sqlite, {
-      accessUrl: "https://bridge.simplefin.org/access/demo",
-      connectionId: "conn_simplefin_primary",
-      externalConnectionId: "simplefin_primary",
-      provider: "simplefin",
+      accessToken: "plaid-access-token-primary",
+      connectionId: "conn_plaid_primary",
+      externalConnectionId: "plaid_primary",
+      provider: "plaid",
       status: "active",
     });
     insertSucceededRun(sqlite, {
@@ -729,8 +729,8 @@ describe("getHomepageSnapshot", () => {
         acct_savings: 3500000,
       },
       completedAt: firstCompletedAt,
-      provider: "simplefin",
-      providerConnectionId: "conn_simplefin_primary",
+      provider: "plaid",
+      providerConnectionId: "conn_plaid_primary",
       runId: "sync_seed_2026_03_15",
       startedAt: new Date("2026-03-15T18:25:00.000Z"),
     });
@@ -742,8 +742,8 @@ describe("getHomepageSnapshot", () => {
         acct_savings: 3527600,
       },
       completedAt: secondCompletedAt,
-      provider: "simplefin",
-      providerConnectionId: "conn_simplefin_primary",
+      provider: "plaid",
+      providerConnectionId: "conn_plaid_primary",
       runId: "sync_seed_2026_03_16",
       startedAt: new Date("2026-03-16T18:25:00.000Z"),
     });
@@ -794,28 +794,12 @@ describe("getHomepageSnapshot", () => {
     expect(snapshot?.history).toHaveLength(2);
     expect(snapshot?.connectionStates).toEqual([
       {
-        configuredConnectionCount: 0,
-        lastSuccessfulSyncAt: null,
-        latestRunAt: null,
-        latestRunStatus: "never",
-        provider: "plaid",
-        status: "not_connected",
-      },
-      {
         configuredConnectionCount: 1,
         lastSuccessfulSyncAt: secondCompletedAt,
         latestRunAt: secondCompletedAt,
         latestRunStatus: "succeeded",
-        provider: "simplefin",
+        provider: "plaid",
         status: "active",
-      },
-      {
-        configuredConnectionCount: 0,
-        lastSuccessfulSyncAt: null,
-        latestRunAt: null,
-        latestRunStatus: "never",
-        provider: "snaptrade",
-        status: "not_connected",
       },
     ]);
   });
@@ -824,10 +808,10 @@ describe("getHomepageSnapshot", () => {
     const { db, sqlite } = createTestDb();
 
     insertProviderConnection(sqlite, {
-      accessSecret: "snaptrade-secret",
-      connectionId: "conn_snaptrade_primary",
-      externalConnectionId: "snaptrade_primary",
-      provider: "snaptrade",
+      accessToken: "plaid-access-token-primary",
+      connectionId: "conn_plaid_primary",
+      externalConnectionId: "plaid_primary",
+      provider: "plaid",
       status: "error",
     });
 
@@ -841,22 +825,6 @@ describe("getHomepageSnapshot", () => {
         latestRunAt: null,
         latestRunStatus: "never",
         provider: "plaid",
-        status: "not_connected",
-      },
-      {
-        configuredConnectionCount: 0,
-        lastSuccessfulSyncAt: null,
-        latestRunAt: null,
-        latestRunStatus: "never",
-        provider: "simplefin",
-        status: "not_connected",
-      },
-      {
-        configuredConnectionCount: 0,
-        lastSuccessfulSyncAt: null,
-        latestRunAt: null,
-        latestRunStatus: "never",
-        provider: "snaptrade",
         status: "error",
       },
     ]);

@@ -56,8 +56,7 @@ describe("sync worker", () => {
       `
         update provider_connections
         set status = 'disconnected',
-            access_url = null,
-            access_secret = null
+            access_token = null
       `,
     );
     const consoleLog = mock(() => {});
@@ -113,7 +112,7 @@ describe("sync worker", () => {
     );
   });
 
-  test("scheduled prefers configured SimpleFIN connections over the demo fixture path", async () => {
+  test("scheduled prefers configured Plaid connections over the demo fixture path", async () => {
     const { d1, sqlite } = createEmptySyncDatabase();
     const createdAt = new Date("2026-03-15T12:00:00.000Z").getTime();
     const nowEpochSeconds = Math.floor(
@@ -137,43 +136,54 @@ describe("sync worker", () => {
             provider,
             status,
             external_connection_id,
-            access_url,
+            access_token,
+            institution_name,
+            plaid_item_id,
             created_at,
             updated_at
           )
-          values (?, ?, ?, ?, ?, ?, ?, ?)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
-        "conn_simplefin_us_bank",
+        "conn_plaid_us_bank",
         "household_demo",
-        "simplefin",
+        "plaid",
         "active",
-        "simplefin-us-bank",
-        "https://demo-user:demo-pass@bridge.example/simplefin",
+        "plaid-us-bank",
+        "access-us-bank-demo",
+        "US Bank",
+        "item-us-bank-demo",
         createdAt,
         createdAt,
       );
 
-    const fetchMock = mock(async () => {
+    const fetchMock = mock(async (input: RequestInfo | URL) => {
+      const requestUrl = new URL(String(input));
+
+      expect(requestUrl.pathname).toBe("/accounts/get");
+
       return new Response(
         JSON.stringify({
           accounts: [
             {
-              balance: "1023.45",
-              "balance-date": nowEpochSeconds,
-              currency: "USD",
-              id: "checking-123",
-              name: "Everyday Checking",
-              org: {
-                domain: "usbank.com",
-                name: "US Bank",
-                "sfin-url": "https://bridge.simplefin.org/simplefin",
+              account_id: "checking-123",
+              balances: {
+                available: 1023.45,
+                current: 1023.45,
+                iso_currency_code: "USD",
               },
-              transactions: [],
+              name: "Everyday Checking",
+              official_name: "US Bank Platinum Checking",
+              subtype: "checking",
+              type: "depository",
             },
           ],
-          errors: [],
+          item: {
+            institution_id: "ins_us_bank",
+            item_id: "item-us-bank-demo",
+          },
+          request_id: `request-${nowEpochSeconds}`,
         }),
         {
           headers: { "content-type": "application/json" },
@@ -190,7 +200,12 @@ describe("sync worker", () => {
     try {
       await worker.scheduled(
         { cron: "0 13 * * *" } as ScheduledEvent,
-        { DB: d1 } as Env,
+        {
+          DB: d1,
+          PLAID_CLIENT_ID: "client-demo",
+          PLAID_ENV: "sandbox",
+          PLAID_SECRET: "secret-demo",
+        } as Env,
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -205,7 +220,7 @@ describe("sync worker", () => {
         .query(
           "select count(*) as count from provider_accounts where provider_connection_id = ?",
         )
-        .get("conn_simplefin_us_bank"),
+        .get("conn_plaid_us_bank"),
     ).toEqual({ count: 1 });
     expect(
       sqlite
@@ -223,7 +238,7 @@ describe("sync worker", () => {
     expect(loggedPayload).toContain('"usedFixtureData":false');
   });
 
-  test("scheduled does not fall back to fixture data when a configured connection fails", async () => {
+  test("scheduled does not fall back to fixture data when a configured Plaid connection fails", async () => {
     const { d1, sqlite } = createEmptySyncDatabase();
     const createdAt = new Date("2026-03-15T12:00:00.000Z").getTime();
 
@@ -244,20 +259,24 @@ describe("sync worker", () => {
             provider,
             status,
             external_connection_id,
-            access_url,
+            access_token,
+            institution_name,
+            plaid_item_id,
             created_at,
             updated_at
           )
-          values (?, ?, ?, ?, ?, ?, ?, ?)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
-        "conn_simplefin_broken",
+        "conn_plaid_broken",
         "household_demo",
-        "simplefin",
+        "plaid",
         "active",
-        "simplefin-broken",
-        "https://demo-user:demo-pass@bridge.example/simplefin",
+        "plaid-broken",
+        "access-broken-demo",
+        "US Bank",
+        "item-broken-demo",
         createdAt,
         createdAt,
       );
@@ -274,7 +293,12 @@ describe("sync worker", () => {
     try {
       await worker.scheduled(
         { cron: "0 13 * * *" } as ScheduledEvent,
-        { DB: d1 } as Env,
+        {
+          DB: d1,
+          PLAID_CLIENT_ID: "client-demo",
+          PLAID_ENV: "sandbox",
+          PLAID_SECRET: "secret-demo",
+        } as Env,
       );
     } finally {
       globalThis.fetch = originalFetch;

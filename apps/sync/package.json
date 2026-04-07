@@ -13,9 +13,7 @@
   },
   "dependencies": {
     "@vista/db": "workspace:*",
-    "@vista/plaid": "workspace:*",
-    "@vista/simplefin": "workspace:*",
-    "@vista/snaptrade": "workspace:*"
+    "@vista/plaid": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",

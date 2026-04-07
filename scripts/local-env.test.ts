@@ -21,13 +21,13 @@ describe("parseLocalEnv", () => {
     expect(
       parseLocalEnv(`
         # comment
-        SNAPTRADE_CLIENT_ID=client-demo
-        SNAPTRADE_CONSUMER_KEY="consumer-demo"
+        PLAID_CLIENT_ID=client-demo
+        PLAID_SECRET="secret-demo"
         export VISTA_SKIP_SEED='1'
       `),
     ).toEqual({
-      SNAPTRADE_CLIENT_ID: "client-demo",
-      SNAPTRADE_CONSUMER_KEY: "consumer-demo",
+      PLAID_CLIENT_ID: "client-demo",
+      PLAID_SECRET: "secret-demo",
       VISTA_SKIP_SEED: "1",
     });
   });
@@ -43,12 +43,10 @@ describe("formatLocalEnv", () => {
   test("renders stable quoted assignments", () => {
     expect(
       formatLocalEnv({
-        SNAPTRADE_CONSUMER_KEY: "consumer-demo",
-        SNAPTRADE_CLIENT_ID: "client-demo",
+        PLAID_CLIENT_ID: "client-demo",
+        PLAID_SECRET: "secret-demo",
       }),
-    ).toBe(
-      'SNAPTRADE_CLIENT_ID="client-demo"\nSNAPTRADE_CONSUMER_KEY="consumer-demo"',
-    );
+    ).toBe('PLAID_CLIENT_ID="client-demo"\nPLAID_SECRET="secret-demo"');
   });
 });
 
@@ -65,8 +63,8 @@ describe("syncCloudflareDevVarsFiles", () => {
       sourceFileLabel: ".env.local",
       targetDirs: [targetA, targetB],
       values: {
-        SNAPTRADE_CLIENT_ID: "client-demo",
-        SNAPTRADE_CONSUMER_KEY: "consumer-demo",
+        PLAID_CLIENT_ID: "client-demo",
+        PLAID_SECRET: "secret-demo",
       },
     });
 
@@ -74,10 +72,10 @@ describe("syncCloudflareDevVarsFiles", () => {
     const targetBFile = path.join(targetB, ".dev.vars");
 
     expect(readFileSync(targetAFile, "utf8")).toContain(
-      'SNAPTRADE_CLIENT_ID="client-demo"',
+      'PLAID_CLIENT_ID="client-demo"',
     );
     expect(readFileSync(targetBFile, "utf8")).toContain(
-      'SNAPTRADE_CONSUMER_KEY="consumer-demo"',
+      'PLAID_SECRET="secret-demo"',
     );
 
     rmSync(tempRoot, { force: true, recursive: true });
@@ -90,7 +88,7 @@ describe("syncCloudflareDevVarsFiles", () => {
     mkdirSync(targetDir, { recursive: true });
     writeFileSync(
       path.join(targetDir, ".dev.vars"),
-      'SNAPTRADE_CLIENT_ID="stale"\n',
+      'PLAID_CLIENT_ID="stale"\n',
     );
 
     syncCloudflareDevVarsFiles({

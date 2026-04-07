@@ -8,10 +8,11 @@ import {
   type ProviderConnectionStatus,
   type ProviderType,
   providerConnections,
-  providerTypes,
   type SyncRunStatus,
   syncRuns,
 } from "./schema";
+
+const homepageProviderTypes = ["plaid"] as const satisfies ProviderType[];
 
 const accountTypeLabels = {
   brokerage: "Brokerage",
@@ -405,26 +406,13 @@ async function loadHomepageConnectionStates(
       .orderBy(desc(syncRuns.completedAt), desc(syncRuns.startedAt)),
   ]);
 
-  return providerTypes.map((provider) => {
+  return homepageProviderTypes.map((provider) => {
     const providerConnectionsForProvider = connectionRows.filter(
       (connection) => connection.provider === provider,
     );
     const configuredConnectionCount = providerConnectionsForProvider.filter(
-      (connection) => {
-        if (connection.status !== "active") {
-          return false;
-        }
-
-        if (provider === "simplefin") {
-          return Boolean(connection.accessUrl);
-        }
-
-        if (provider === "snaptrade") {
-          return Boolean(connection.accessSecret);
-        }
-
-        return Boolean(connection.accessToken);
-      },
+      (connection) =>
+        connection.status === "active" && Boolean(connection.accessToken),
     ).length;
     const status: HomepageSnapshot["connectionStates"][number]["status"] =
       configuredConnectionCount > 0
