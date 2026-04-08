@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
+import { createMemoryRouter, RouterProvider } from "react-router";
 
 import { AccountReviewScreen, action } from "./account-review";
 
@@ -204,52 +205,60 @@ describe("account review route", () => {
   });
 
   test("renders curated account controls and the saved-state banner", () => {
-    const html = renderToStaticMarkup(
-      <AccountReviewScreen
-        activeSaveAccountId={null}
-        loaderData={{
-          accounts: [
-            {
-              accountType: "checking",
-              balanceMinor: 1284500,
-              displayName: "Household Operating",
-              id: "acct_checking",
-              includeInHouseholdReporting: false,
-              institutionName: "US Bank",
-              isHidden: true,
-              name: "Everyday Checking",
-              ownershipType: "mine",
-            },
-            {
-              accountType: "credit_card",
-              balanceMinor: -12345,
-              displayName: null,
-              id: "acct_credit_card",
-              includeInHouseholdReporting: true,
-              institutionName: "US Bank",
-              isHidden: false,
-              name: "Primary Credit Card",
-              ownershipType: "joint",
-            },
-          ],
-          householdName: "Vista Household",
-          kind: "ready",
-          lastSyncedAt: "2026-03-16T18:30:00.000Z",
-          summary: {
-            excludedCount: 1,
-            hiddenCount: 1,
-            includedCount: 1,
-          },
-          updatedAccountId: "acct_checking",
-        }}
-      />,
+    const loaderData = {
+      accounts: [
+        {
+          accountType: "checking" as const,
+          balanceMinor: 1284500,
+          displayName: "Household Operating",
+          id: "acct_checking",
+          includeInHouseholdReporting: false,
+          institutionName: "US Bank",
+          isHidden: true,
+          name: "Everyday Checking",
+          ownershipType: "mine" as const,
+          reportingGroup: "cash" as const,
+        },
+        {
+          accountType: "credit_card" as const,
+          balanceMinor: -12345,
+          displayName: null,
+          id: "acct_credit_card",
+          includeInHouseholdReporting: true,
+          institutionName: "US Bank",
+          isHidden: false,
+          name: "Primary Credit Card",
+          ownershipType: "joint" as const,
+          reportingGroup: "liabilities" as const,
+        },
+      ],
+      householdName: "Vista Household",
+      kind: "ready" as const,
+      lastSyncedAt: "2026-03-16T18:30:00.000Z",
+      summary: {
+        excludedCount: 1,
+        hiddenCount: 1,
+        includedCount: 1,
+      },
+      updatedAccountId: "acct_checking",
+    };
+
+    const router = createMemoryRouter(
+      [
+        {
+          element: <AccountReviewScreen loaderData={loaderData} />,
+          path: "/accounts/review",
+        },
+      ],
+      { initialEntries: ["/accounts/review"] },
     );
 
-    expect(html).toContain("Account Curation");
+    const html = renderToStaticMarkup(<RouterProvider router={router} />);
+
+    expect(html).toContain("Accounts");
     expect(html).toContain("Household Operating");
-    expect(html).toContain("Include in reporting");
-    expect(html).toContain("Hide on snapshot");
+    expect(html).toContain("Excluded");
     expect(html).toContain("Credit Card");
-    expect(html).toContain("Saved changes for Household Operating.");
+    expect(html).toContain("$12,845.00");
   });
 });

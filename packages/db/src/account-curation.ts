@@ -7,6 +7,7 @@ import {
   households,
   type OwnershipType,
   ownershipTypes,
+  type ReportingGroup,
   syncRuns,
 } from "./schema";
 
@@ -16,6 +17,10 @@ const accountTypeOrder = [
   "credit_card",
   "brokerage",
   "retirement",
+  "mortgage",
+  "student_loan",
+  "loan",
+  "line_of_credit",
 ] as const;
 
 type AccountType = (typeof accountTypeOrder)[number];
@@ -32,6 +37,7 @@ export type AccountCurationSnapshot = {
     isHidden: boolean;
     name: string;
     ownershipType: OwnershipType;
+    reportingGroup: ReportingGroup;
   }>;
   householdId: string;
   householdName: string;
@@ -133,6 +139,7 @@ export async function getAccountCurationSnapshot(
           isHidden: accounts.isHidden,
           name: accounts.name,
           ownershipType: accounts.ownershipType,
+          reportingGroup: accounts.reportingGroup,
           snapshotBalanceMinor: balanceSnapshots.balanceMinor,
         })
         .from(accounts)
@@ -155,6 +162,7 @@ export async function getAccountCurationSnapshot(
           isHidden: accounts.isHidden,
           name: accounts.name,
           ownershipType: accounts.ownershipType,
+          reportingGroup: accounts.reportingGroup,
           snapshotBalanceMinor: accounts.balanceMinor,
         })
         .from(accounts)
@@ -171,6 +179,7 @@ export async function getAccountCurationSnapshot(
       isHidden: row.isHidden,
       name: row.name,
       ownershipType: row.ownershipType,
+      reportingGroup: row.reportingGroup as ReportingGroup,
     })),
   );
 
