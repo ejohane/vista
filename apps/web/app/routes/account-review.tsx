@@ -424,10 +424,10 @@ function AccountRow({ account }: { account: ReadyAccount }) {
 
 export function meta(_: Route.MetaArgs) {
   return [
-    { title: "Vista | Accounts" },
+    { title: "Vista | Household Accounts" },
     {
       content:
-        "Manage accounts, set ownership, and control what is included in Vista.",
+        "See every household account, sort by type, and manage ownership and Vista inclusion.",
       name: "description",
     },
   ];
