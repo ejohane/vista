@@ -1,52 +1,52 @@
 import {
   EyeSlashIcon,
-  FunnelSimpleXIcon,
-  ShieldCheckIcon,
+  MagnifyingGlassIcon,
+  PencilSimpleIcon,
+  SpinnerGapIcon,
 } from "@phosphor-icons/react";
 import {
+  type AccountCurationSnapshot,
   getAccountCurationSnapshot,
   getDb,
   ownershipTypes,
   updateAccountCuration,
 } from "@vista/db";
-import { type ReactNode, useDeferredValue, useState } from "react";
-import { redirect, useActionData, useNavigation } from "react-router";
+import { useDeferredValue, useState } from "react";
+import { redirect, useFetcher } from "react-router";
 
 import { DashboardShell } from "@/components/dashboard-shell";
-import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { formatUpdatedAt, formatUsd } from "@/lib/format";
+import { formatCompactUsd, formatUpdatedAt, formatUsd } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { Route } from "./+types/account-review";
 
-const accountTypeLabels = {
+/* ------------------------------------------------------------------ */
+/*  Constants & types                                                  */
+/* ------------------------------------------------------------------ */
+
+const accountTypeLabels: Record<string, string> = {
   brokerage: "Brokerage",
   checking: "Checking",
   credit_card: "Credit Card",
+  line_of_credit: "Line of Credit",
+  loan: "Loan",
+  mortgage: "Mortgage",
   retirement: "Retirement",
   savings: "Savings",
-} as const;
-
-type OwnershipOption = (typeof ownershipTypes)[number];
-type ReadyAccount = {
-  accountType: keyof typeof accountTypeLabels;
-  balanceMinor: number;
-  displayName: null | string;
-  id: string;
-  includeInHouseholdReporting: boolean;
-  institutionName: string;
-  isHidden: boolean;
-  name: string;
-  ownershipType: OwnershipOption;
+  student_loan: "Student Loan",
 };
+
+const ownershipLabels: Record<string, string> = {
+  joint: "Joint",
+  mine: "Mine",
+  wife: "Wife",
+};
+
+type ReportingGroup = "cash" | "investments" | "liabilities";
+type OwnershipOption = (typeof ownershipTypes)[number];
+type ReadyAccount = AccountCurationSnapshot["accounts"][number];
 type ActionData = {
   accountId?: string;
   message: string;
@@ -54,87 +54,381 @@ type ActionData = {
 };
 type LoaderData = Route.ComponentProps["loaderData"];
 
-function groupAccounts(accounts: ReadyAccount[]) {
-  const groups = new Map<
-    keyof typeof accountTypeLabels,
-    {
-      accounts: ReadyAccount[];
-      key: keyof typeof accountTypeLabels;
-      label: string;
-    }
-  >();
+type FilterGroup = "all" | ReportingGroup;
+type SortOption =
+  | "balance-asc"
+  | "balance-desc"
+  | "default"
+  | "name-asc"
+  | "name-desc"
+  | "type";
 
-  for (const account of accounts) {
-    const existing = groups.get(account.accountType);
-    if (existing) {
-      existing.accounts.push(account);
-      continue;
-    }
-    groups.set(account.accountType, {
-      accounts: [account],
-      key: account.accountType,
-      label: accountTypeLabels[account.accountType],
-    });
+const sortLabels: Record<SortOption, string> = {
+  "balance-asc": "Balance (low \u2192 high)",
+  "balance-desc": "Balance (high \u2192 low)",
+  default: "Default",
+  "name-asc": "Name A\u2192Z",
+  "name-desc": "Name Z\u2192A",
+  type: "Type",
+};
+
+const groupBadgeColors: Record<ReportingGroup, string> = {
+  cash: "border-emerald-500/20 bg-emerald-500/10 text-emerald-400",
+  investments: "border-amber-500/20 bg-amber-500/10 text-amber-400",
+  liabilities: "border-rose-500/20 bg-rose-500/10 text-rose-400",
+};
+
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                            */
+/* ------------------------------------------------------------------ */
+
+function filterAccounts(
+  accounts: ReadyAccount[],
+  group: FilterGroup,
+  query: string,
+) {
+  let filtered = accounts;
+  if (group !== "all") {
+    filtered = filtered.filter((a) => a.reportingGroup === group);
   }
-
-  return Array.from(groups.values());
+  if (query) {
+    filtered = filtered.filter((a) =>
+      [
+        a.displayName,
+        a.name,
+        a.institutionName,
+        accountTypeLabels[a.accountType],
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }
+  return filtered;
 }
 
-function filterAccounts(accounts: ReadyAccount[], query: string) {
-  if (!query) return accounts;
+function sortAccounts(
+  accounts: ReadyAccount[],
+  sort: SortOption,
+): ReadyAccount[] {
+  if (sort === "default") return accounts;
+  return [...accounts].sort((a, b) => {
+    switch (sort) {
+      case "balance-desc":
+        return b.balanceMinor - a.balanceMinor;
+      case "balance-asc":
+        return a.balanceMinor - b.balanceMinor;
+      case "name-asc":
+        return (a.displayName ?? a.name).localeCompare(b.displayName ?? b.name);
+      case "name-desc":
+        return (b.displayName ?? b.name).localeCompare(a.displayName ?? a.name);
+      case "type":
+        return a.accountType.localeCompare(b.accountType);
+      default:
+        return 0;
+    }
+  });
+}
 
-  return accounts.filter((account) =>
-    [
-      account.displayName,
-      account.name,
-      account.institutionName,
-      accountTypeLabels[account.accountType],
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase()
-      .includes(query),
+function computeSummary(accounts: ReadyAccount[]) {
+  const balances: Record<ReportingGroup, number> = {
+    cash: 0,
+    investments: 0,
+    liabilities: 0,
+  };
+  const counts = {
+    cash: 0,
+    included: 0,
+    investments: 0,
+    liabilities: 0,
+    total: accounts.length,
+  };
+  for (const a of accounts) {
+    const g = a.reportingGroup;
+    balances[g] += a.balanceMinor;
+    counts[g]++;
+    if (a.includeInHouseholdReporting) counts.included++;
+  }
+  return { balances, counts };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Small UI pieces                                                    */
+/* ------------------------------------------------------------------ */
+
+function ToggleSwitch({
+  checked,
+  disabled,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        disabled && "cursor-not-allowed opacity-50",
+        checked ? "bg-primary" : "bg-muted-foreground/30",
+      )}
+    >
+      <span
+        className={cn(
+          "pointer-events-none block size-3.5 rounded-full bg-white shadow-sm transition-transform",
+          checked ? "translate-x-[18px]" : "translate-x-[3px]",
+        )}
+      />
+    </button>
   );
 }
 
-function checkboxNameFor(accountId: string, field: "hidden" | "reporting") {
-  return `${accountId}_${field}`;
+function TypeBadge({
+  accountType,
+  reportingGroup,
+}: {
+  accountType: string;
+  reportingGroup: ReportingGroup;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium leading-none",
+        groupBadgeColors[reportingGroup],
+      )}
+    >
+      {accountTypeLabels[accountType] ?? accountType}
+    </span>
+  );
 }
 
 function SummaryCard({
+  color,
   detail,
-  icon,
   label,
   value,
 }: {
+  color?: string;
   detail: string;
-  icon: ReactNode;
   label: string;
   value: string;
 }) {
   return (
     <Card>
       <CardContent className="p-4">
-        <div className="flex items-center gap-2 text-primary">
-          {icon}
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-            {label}
-          </p>
-        </div>
-        <p className="mt-3 text-2xl font-semibold tabular-nums">{value}</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+          {label}
+        </p>
+        <p className={cn("mt-2 text-2xl font-semibold tabular-nums", color)}>
+          {value}
+        </p>
         <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
       </CardContent>
     </Card>
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  Account row                                                        */
+/* ------------------------------------------------------------------ */
+
+function AccountRow({ account }: { account: ReadyAccount }) {
+  const fetcher = useFetcher();
+  const [expanded, setExpanded] = useState(false);
+  const [localDisplayName, setLocalDisplayName] = useState(
+    account.displayName ?? "",
+  );
+  const isSubmitting = fetcher.state !== "idle";
+
+  const optimistic =
+    isSubmitting && fetcher.formData
+      ? {
+          includeInHouseholdReporting:
+            fetcher.formData.get("includeInHouseholdReporting") === "on",
+          isHidden: fetcher.formData.get("isHidden") === "on",
+          ownershipType: fetcher.formData.get(
+            "ownershipType",
+          ) as OwnershipOption,
+        }
+      : null;
+
+  const displayOwnership = optimistic?.ownershipType ?? account.ownershipType;
+  const displayIncluded =
+    optimistic?.includeInHouseholdReporting ??
+    account.includeInHouseholdReporting;
+  const displayHidden = optimistic?.isHidden ?? account.isHidden;
+  const effectiveName = account.displayName ?? account.name;
+
+  const submitChange = (changes: {
+    displayName?: string;
+    includeInHouseholdReporting?: boolean;
+    isHidden?: boolean;
+    ownershipType?: string;
+  }) => {
+    const data: Record<string, string> = {
+      accountId: account.id,
+      displayName: changes.displayName ?? localDisplayName ?? "",
+      intent: "inline",
+      ownershipType: changes.ownershipType ?? account.ownershipType,
+    };
+    const included =
+      changes.includeInHouseholdReporting ??
+      account.includeInHouseholdReporting;
+    if (included) data.includeInHouseholdReporting = "on";
+    const hidden = changes.isHidden ?? account.isHidden;
+    if (hidden) data.isHidden = "on";
+    fetcher.submit(data, { method: "post" });
+  };
+
+  const balanceColor =
+    account.reportingGroup === "liabilities" || account.balanceMinor < 0
+      ? "text-rose-400"
+      : "";
+
+  return (
+    <div
+      className={cn(
+        "border-b border-border/20 transition-colors last:border-b-0",
+        !displayIncluded && "opacity-50",
+      )}
+    >
+      {/* Main row */}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-5 py-3.5 hover:bg-muted/10">
+        {/* Account info */}
+        <div className="min-w-[180px] flex-1">
+          <div className="flex items-center gap-2.5">
+            <span className="truncate font-medium">{effectiveName}</span>
+            <TypeBadge
+              accountType={account.accountType}
+              reportingGroup={account.reportingGroup}
+            />
+            {displayHidden ? (
+              <EyeSlashIcon className="size-3.5 text-muted-foreground/60" />
+            ) : null}
+            {isSubmitting ? (
+              <SpinnerGapIcon className="size-3.5 animate-spin text-primary" />
+            ) : null}
+          </div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {account.institutionName}
+          </p>
+        </div>
+
+        {/* Balance */}
+        <div
+          className={cn(
+            "w-32 text-right text-base font-semibold tabular-nums",
+            balanceColor,
+          )}
+        >
+          {formatUsd(account.balanceMinor)}
+        </div>
+
+        {/* Ownership */}
+        <select
+          value={displayOwnership}
+          onChange={(e) => submitChange({ ownershipType: e.target.value })}
+          disabled={isSubmitting}
+          className="h-8 w-20 rounded-lg border border-border/40 bg-card/60 px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+        >
+          {ownershipTypes.map((o) => (
+            <option key={o} value={o}>
+              {ownershipLabels[o] ?? o}
+            </option>
+          ))}
+        </select>
+
+        {/* Include toggle */}
+        <div className="flex items-center gap-2">
+          <ToggleSwitch
+            checked={displayIncluded}
+            disabled={isSubmitting}
+            onChange={(v) => submitChange({ includeInHouseholdReporting: v })}
+          />
+          <span className="hidden text-xs text-muted-foreground/70 sm:inline">
+            {displayIncluded ? "Included" : "Excluded"}
+          </span>
+        </div>
+
+        {/* Edit button */}
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className={cn(
+            "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground",
+            expanded && "bg-muted/50 text-foreground",
+          )}
+        >
+          <PencilSimpleIcon className="size-3.5" />
+        </button>
+      </div>
+
+      {/* Expanded edit panel */}
+      {expanded ? (
+        <div className="border-t border-border/10 bg-muted/5 px-5 py-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[200px] max-w-sm flex-1 space-y-1">
+              <label
+                htmlFor={`${account.id}_displayName`}
+                className="text-xs text-muted-foreground"
+              >
+                Display name
+              </label>
+              <Input
+                id={`${account.id}_displayName`}
+                value={localDisplayName}
+                onChange={(e) =>
+                  setLocalDisplayName((e.target as HTMLInputElement).value)
+                }
+                placeholder={account.name}
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={displayHidden}
+                onChange={(e) =>
+                  submitChange({
+                    isHidden: (e.target as HTMLInputElement).checked,
+                  })
+                }
+                disabled={isSubmitting}
+                className="size-4 rounded border-border"
+              />
+              <span className="text-xs text-muted-foreground">
+                Hidden from snapshot
+              </span>
+            </label>
+            <Button
+              size="sm"
+              disabled={isSubmitting}
+              onClick={() => {
+                submitChange({ displayName: localDisplayName });
+                setExpanded(false);
+              }}
+            >
+              {isSubmitting ? "Saving\u2026" : "Save name"}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function meta(_: Route.MetaArgs) {
   return [
-    { title: "Vista | Account Review" },
+    { title: "Vista | Household Accounts" },
     {
-      name: "description",
       content:
-        "Review imported accounts, rename them, set ownership, and control reporting visibility.",
+        "See every household account, sort by type, and manage ownership and Vista inclusion.",
+      name: "description",
     },
   ];
 }
@@ -164,6 +458,7 @@ export async function action({ context, request }: Route.ActionArgs) {
   const accountId = formData.get("accountId");
   const displayName = formData.get("displayName");
   const ownershipType = formData.get("ownershipType");
+  const intent = formData.get("intent");
 
   if (typeof accountId !== "string" || !accountId.trim()) {
     return {
@@ -195,6 +490,10 @@ export async function action({ context, request }: Route.ActionArgs) {
       ownershipType: resolvedOwnershipType,
     });
 
+    if (intent === "inline") {
+      return { accountId, ok: true as const };
+    }
+
     return redirect(
       `/accounts/review?updated=${encodeURIComponent(accountId)}`,
     );
@@ -210,51 +509,31 @@ export async function action({ context, request }: Route.ActionArgs) {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/*  Main screen                                                        */
+/* ------------------------------------------------------------------ */
+
 export function AccountReviewScreen({
-  activeSaveAccountId,
-  actionData,
   loaderData,
 }: {
-  activeSaveAccountId: null | string;
-  actionData?: ActionData;
   loaderData: LoaderData;
 }) {
   const [searchValue, setSearchValue] = useState("");
+  const [filterGroup, setFilterGroup] = useState<FilterGroup>("all");
+  const [sortOption, setSortOption] = useState<SortOption>("default");
   const deferredSearch = useDeferredValue(searchValue);
   const normalizedSearch = deferredSearch.trim().toLowerCase();
-  const filteredAccounts =
-    loaderData.kind === "ready"
-      ? filterAccounts(loaderData.accounts, normalizedSearch)
-      : [];
-  const groupedAccounts = groupAccounts(filteredAccounts);
-  const updatedAccount =
-    loaderData.kind === "ready" && loaderData.updatedAccountId
-      ? loaderData.accounts.find((a) => a.id === loaderData.updatedAccountId)
-      : null;
 
-  return (
-    <DashboardShell activePath="/accounts/review">
-      <div className="space-y-6 p-5 lg:p-8">
-        {/* Header */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+  if (loaderData.kind !== "ready") {
+    return (
+      <DashboardShell activePath="/accounts/review">
+        <div className="space-y-6 p-5 lg:p-8">
           <div>
-            <p className="text-sm text-muted-foreground">
-              {loaderData.kind === "ready"
-                ? loaderData.householdName
-                : "Account Review"}
-            </p>
+            <p className="text-sm text-muted-foreground">Account Management</p>
             <h1 className="vista-display mt-1 text-3xl lg:text-4xl">
-              Account Curation
+              Accounts
             </h1>
           </div>
-          {loaderData.kind === "ready" ? (
-            <div className="text-xs text-muted-foreground">
-              Updated {formatUpdatedAt(loaderData.lastSyncedAt)}
-            </div>
-          ) : null}
-        </div>
-
-        {loaderData.kind === "empty" ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-16 text-center">
               <p className="text-lg font-medium">No accounts imported yet</p>
@@ -271,211 +550,155 @@ export function AccountReviewScreen({
               </div>
             </CardContent>
           </Card>
-        ) : (
-          <>
-            {/* Summary cards + search */}
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="sm:col-span-2 lg:col-span-1">
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={searchValue}
-                    onChange={(e) => setSearchValue(e.target.value)}
-                    placeholder="Search accounts..."
-                    className="h-10 w-full rounded-lg border border-border/60 bg-card/60 px-3 text-sm outline-none placeholder:text-muted-foreground/60 focus:border-ring focus:ring-2 focus:ring-ring/30"
-                  />
-                </div>
-              </div>
-              <SummaryCard
-                detail="Counted in household totals"
-                icon={<ShieldCheckIcon className="size-4" />}
-                label="Included"
-                value={String(loaderData.summary.includedCount)}
-              />
-              <SummaryCard
-                detail="Hidden from snapshot view"
-                icon={<EyeSlashIcon className="size-4" />}
-                label="Hidden"
-                value={String(loaderData.summary.hiddenCount)}
-              />
-              <SummaryCard
-                detail="Excluded from reporting"
-                icon={<FunnelSimpleXIcon className="size-4" />}
-                label="Excluded"
-                value={String(loaderData.summary.excludedCount)}
+        </div>
+      </DashboardShell>
+    );
+  }
+
+  const { accounts, householdName, lastSyncedAt } = loaderData;
+  const stats = computeSummary(accounts);
+  const filtered = filterAccounts(accounts, filterGroup, normalizedSearch);
+  const sorted = sortAccounts(filtered, sortOption);
+
+  const filterGroups: { count: number; key: FilterGroup; label: string }[] = [
+    { count: stats.counts.total, key: "all", label: "All" },
+    { count: stats.counts.cash, key: "cash", label: "Cash" },
+    {
+      count: stats.counts.investments,
+      key: "investments",
+      label: "Investments",
+    },
+    {
+      count: stats.counts.liabilities,
+      key: "liabilities",
+      label: "Liabilities",
+    },
+  ];
+
+  return (
+    <DashboardShell activePath="/accounts/review">
+      <div className="space-y-6 p-5 lg:p-8">
+        {/* Header */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm text-muted-foreground">{householdName}</p>
+            <h1 className="vista-display mt-1 text-3xl lg:text-4xl">
+              Accounts
+            </h1>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Updated {formatUpdatedAt(lastSyncedAt)}
+          </div>
+        </div>
+
+        {/* Summary cards */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <SummaryCard
+            label="Total Accounts"
+            value={String(stats.counts.total)}
+            detail={`${stats.counts.included} included in Vista`}
+          />
+          <SummaryCard
+            color="text-emerald-400"
+            detail={`${stats.counts.cash} accounts`}
+            label="Cash"
+            value={formatCompactUsd(stats.balances.cash)}
+          />
+          <SummaryCard
+            color="text-amber-400"
+            detail={`${stats.counts.investments} accounts`}
+            label="Investments"
+            value={formatCompactUsd(stats.balances.investments)}
+          />
+          <SummaryCard
+            color="text-rose-400"
+            detail={`${stats.counts.liabilities} accounts`}
+            label="Liabilities"
+            value={formatCompactUsd(stats.balances.liabilities)}
+          />
+        </div>
+
+        {/* Filter & sort bar */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex gap-1.5">
+            {filterGroups.map((g) => (
+              <button
+                key={g.key}
+                type="button"
+                onClick={() => setFilterGroup(g.key)}
+                className={cn(
+                  "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+                  filterGroup === g.key
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                )}
+              >
+                {g.label}
+                <span className="ml-1.5 opacity-60">{g.count}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="ml-auto flex items-center gap-3">
+            <select
+              value={sortOption}
+              onChange={(e) => setSortOption(e.target.value as SortOption)}
+              className="h-8 rounded-lg border border-border/40 bg-card/60 px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+            >
+              {(Object.keys(sortLabels) as SortOption[]).map((key) => (
+                <option key={key} value={key}>
+                  {sortLabels[key]}
+                </option>
+              ))}
+            </select>
+
+            <div className="relative">
+              <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/60" />
+              <input
+                type="text"
+                value={searchValue}
+                onChange={(e) => setSearchValue(e.target.value)}
+                placeholder="Search accounts\u2026"
+                className="h-8 w-44 rounded-lg border border-border/40 bg-card/60 pl-8 pr-3 text-xs outline-none placeholder:text-muted-foreground/50 focus:border-ring focus:ring-2 focus:ring-ring/30"
               />
             </div>
+          </div>
+        </div>
 
-            {/* Success/error messages */}
-            {updatedAccount ? (
-              <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
-                Saved changes for{" "}
-                {updatedAccount.displayName ?? updatedAccount.name}.
-              </div>
-            ) : null}
-            {actionData ? (
-              <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
-                {actionData.message}
-              </div>
-            ) : null}
+        {/* Account list */}
+        {sorted.length > 0 ? (
+          <Card className="overflow-hidden py-0">
+            {/* Column headers (desktop) */}
+            <div className="hidden items-center gap-5 border-b border-border/30 px-5 py-2.5 lg:flex">
+              <span className="flex-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+                Account
+              </span>
+              <span className="w-32 text-right text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+                Balance
+              </span>
+              <span className="w-20 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+                Owner
+              </span>
+              <span className="w-[106px] text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+                Status
+              </span>
+              <span className="w-7" />
+            </div>
 
-            {/* Account groups */}
-            {groupedAccounts.length ? (
-              <div className="space-y-6">
-                {groupedAccounts.map((group) => (
-                  <div key={group.key}>
-                    <h2 className="mb-3 text-lg font-semibold">
-                      {group.label}
-                    </h2>
-                    <div className="grid gap-4 xl:grid-cols-2">
-                      {group.accounts.map((account) => {
-                        const effectiveName =
-                          account.displayName ?? account.name;
-                        const isSaving = activeSaveAccountId === account.id;
-
-                        return (
-                          <Card key={account.id}>
-                            <CardHeader>
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <CardTitle className="text-base">
-                                    {effectiveName}
-                                  </CardTitle>
-                                  <CardDescription>
-                                    {account.institutionName} ·{" "}
-                                    {formatUsd(account.balanceMinor)}
-                                  </CardDescription>
-                                </div>
-                                <div className="flex gap-1">
-                                  {!account.includeInHouseholdReporting ? (
-                                    <Badge
-                                      variant="outline"
-                                      className="text-[10px]"
-                                    >
-                                      Excluded
-                                    </Badge>
-                                  ) : null}
-                                  {account.isHidden ? (
-                                    <Badge
-                                      variant="outline"
-                                      className="text-[10px]"
-                                    >
-                                      Hidden
-                                    </Badge>
-                                  ) : null}
-                                </div>
-                              </div>
-                            </CardHeader>
-                            <CardContent>
-                              <form method="post" className="space-y-4">
-                                <input
-                                  type="hidden"
-                                  name="accountId"
-                                  value={account.id}
-                                />
-                                <div className="grid gap-4 sm:grid-cols-2">
-                                  <div className="space-y-1.5">
-                                    <Label
-                                      htmlFor={`${account.id}_displayName`}
-                                      className="text-xs"
-                                    >
-                                      Display name
-                                    </Label>
-                                    <Input
-                                      id={`${account.id}_displayName`}
-                                      name="displayName"
-                                      defaultValue={account.displayName ?? ""}
-                                      placeholder={account.name}
-                                    />
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <Label
-                                      htmlFor={`${account.id}_ownershipType`}
-                                      className="text-xs"
-                                    >
-                                      Ownership
-                                    </Label>
-                                    <select
-                                      id={`${account.id}_ownershipType`}
-                                      name="ownershipType"
-                                      defaultValue={account.ownershipType}
-                                      className="flex h-9 w-full rounded-lg border border-border/60 bg-card/60 px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-                                    >
-                                      {ownershipTypes.map((o) => (
-                                        <option key={o} value={o}>
-                                          {o}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                </div>
-                                <div className="flex flex-wrap gap-4 rounded-lg border border-border/40 bg-muted/20 p-3">
-                                  <label
-                                    htmlFor={checkboxNameFor(
-                                      account.id,
-                                      "reporting",
-                                    )}
-                                    className="flex items-center gap-2 text-sm"
-                                  >
-                                    <input
-                                      id={checkboxNameFor(
-                                        account.id,
-                                        "reporting",
-                                      )}
-                                      name="includeInHouseholdReporting"
-                                      type="checkbox"
-                                      defaultChecked={
-                                        account.includeInHouseholdReporting
-                                      }
-                                      className="size-4 rounded border-border"
-                                    />
-                                    Include in reporting
-                                  </label>
-                                  <label
-                                    htmlFor={checkboxNameFor(
-                                      account.id,
-                                      "hidden",
-                                    )}
-                                    className="flex items-center gap-2 text-sm"
-                                  >
-                                    <input
-                                      id={checkboxNameFor(account.id, "hidden")}
-                                      name="isHidden"
-                                      type="checkbox"
-                                      defaultChecked={account.isHidden}
-                                      className="size-4 rounded border-border"
-                                    />
-                                    Hide on snapshot
-                                  </label>
-                                </div>
-                                <Button
-                                  type="submit"
-                                  size="sm"
-                                  disabled={isSaving}
-                                >
-                                  {isSaving ? "Saving..." : "Save"}
-                                </Button>
-                              </form>
-                            </CardContent>
-                          </Card>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <Card>
-                <CardContent className="py-8 text-center">
-                  <p className="text-sm text-muted-foreground">
-                    {normalizedSearch
-                      ? "No accounts match this search"
-                      : "No accounts available"}
-                  </p>
-                </CardContent>
-              </Card>
-            )}
-          </>
+            {sorted.map((account) => (
+              <AccountRow key={account.id} account={account} />
+            ))}
+          </Card>
+        ) : (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <p className="text-sm text-muted-foreground">
+                {normalizedSearch
+                  ? "No accounts match your search"
+                  : "No accounts in this category"}
+              </p>
+            </CardContent>
+          </Card>
         )}
       </div>
     </DashboardShell>
@@ -483,20 +706,5 @@ export function AccountReviewScreen({
 }
 
 export default function AccountReview({ loaderData }: Route.ComponentProps) {
-  const actionData = useActionData<typeof action>() as ActionData | undefined;
-  const navigation = useNavigation();
-  const activeSaveAccountId =
-    navigation.state === "submitting"
-      ? navigation.formData?.get("accountId")
-      : null;
-
-  return (
-    <AccountReviewScreen
-      activeSaveAccountId={
-        typeof activeSaveAccountId === "string" ? activeSaveAccountId : null
-      }
-      actionData={actionData}
-      loaderData={loaderData}
-    />
-  );
+  return <AccountReviewScreen loaderData={loaderData} />;
 }
