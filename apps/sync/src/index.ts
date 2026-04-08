@@ -49,6 +49,24 @@ async function hasConfiguredProviderConnection(env: Env) {
   return configuredConnection !== null;
 }
 
+async function hasLocalSeedData(env: Env) {
+  const seededRows = await env.DB.prepare(
+    `
+      select
+        (select count(*) from households) as householdCount,
+        (select count(*) from accounts) as accountCount
+    `,
+  ).first<{
+    accountCount: number;
+    householdCount: number;
+  }>();
+
+  return (
+    Number(seededRows?.householdCount ?? 0) > 0 &&
+    Number(seededRows?.accountCount ?? 0) > 0
+  );
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -61,7 +79,7 @@ export default {
     return Response.json({
       nextStep: snapshot
         ? `Run curl "${url.href}" to exercise the scheduled handler locally.`
-        : "Run bun run db:seed:local to load the demo household before exercising the sync worker locally.",
+        : "Connect a Plaid account to start syncing, or run bun run db:seed:local if you want demo data locally.",
       status: ready ? "ready" : "waiting_for_seed",
       syncedHousehold: ready ? (snapshot?.householdName ?? null) : null,
     });
@@ -69,6 +87,7 @@ export default {
 
   async scheduled(event, env) {
     const hasConfiguredConnections = await hasConfiguredProviderConnection(env);
+    const hasSeedData = await hasLocalSeedData(env);
     const plaidResults = await syncConfiguredPlaidConnections({
       clientId: readOptionalEnvString(env, "PLAID_CLIENT_ID"),
       database: env.DB,
@@ -82,7 +101,7 @@ export default {
     });
     const syncResults = [...plaidResults];
     const ingestResult =
-      !hasConfiguredConnections && syncResults.length === 0
+      !hasConfiguredConnections && hasSeedData && syncResults.length === 0
         ? await ingestDemoSyncBatch(env.DB)
         : null;
     const snapshot = await readSnapshot(env);
@@ -101,6 +120,10 @@ export default {
           lastSyncedAt: snapshot?.lastSyncedAt.toISOString() ?? null,
           netWorthMinor: snapshot?.totals.netWorthMinor ?? null,
           runId: syncResults[0]?.runId ?? null,
+          awaitingInitialConnection:
+            !hasConfiguredConnections &&
+            !hasSeedData &&
+            syncResults.length === 0,
           syncedConnections: syncResults.length,
           usedFixtureData: false,
         };

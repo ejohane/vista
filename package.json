@@ -16,7 +16,7 @@
     "db:migrate:local": "wrangler d1 migrations apply vista-dev --local --config apps/web/wrangler.jsonc",
     "db:seed:local": "wrangler d1 execute vista-dev --local --config apps/web/wrangler.jsonc --file packages/db/seeds/dev.sql",
     "dev": "bun run scripts/dev.ts",
-    "dev:empty": "bun run scripts/dev.ts --skip-seed",
+    "dev:empty": "bun run scripts/dev.ts",
     "dev:reset": "./scripts/dev-reset.sh",
     "dev:worktree": "./scripts/dev.sh",
     "dev:sync": "bun run scripts/dev-sync.ts",

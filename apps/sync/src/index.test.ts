@@ -7,7 +7,7 @@ import {
 } from "./test-helpers";
 
 describe("sync worker", () => {
-  test("fetch reports waiting_for_seed when no household snapshot exists", async () => {
+  test("fetch reports setup guidance when no household snapshot exists", async () => {
     const { d1 } = createEmptySyncDatabase();
 
     const response = await worker.fetch(new Request("http://127.0.0.1:8788/"), {
@@ -21,7 +21,7 @@ describe("sync worker", () => {
 
     expect(body).toEqual({
       nextStep:
-        "Run bun run db:seed:local to load the demo household before exercising the sync worker locally.",
+        "Connect a Plaid account to start syncing, or run bun run db:seed:local if you want demo data locally.",
       status: "waiting_for_seed",
       syncedHousehold: null,
     });
@@ -108,6 +108,40 @@ describe("sync worker", () => {
         lastSyncedAt: "2026-03-17T18:30:00.000Z",
         netWorthMinor: 46042850,
         runId: "sync_demo_2026_03_17",
+      }),
+    );
+  });
+
+  test("scheduled leaves an empty database untouched until Plaid is connected", async () => {
+    const { d1, sqlite } = createEmptySyncDatabase();
+    const consoleLog = mock(() => {});
+    const originalConsoleLog = console.log;
+    console.log = consoleLog;
+
+    try {
+      await worker.scheduled(
+        { cron: "0 13 * * *" } as ScheduledEvent,
+        { DB: d1 } as Env,
+      );
+    } finally {
+      console.log = originalConsoleLog;
+    }
+
+    expect(
+      sqlite.query("select count(*) as count from sync_runs").get(),
+    ).toEqual({
+      count: 0,
+    });
+    expect(consoleLog).toHaveBeenCalledWith(
+      JSON.stringify({
+        cron: "0 13 * * *",
+        household: null,
+        lastSyncedAt: null,
+        netWorthMinor: null,
+        runId: null,
+        awaitingInitialConnection: true,
+        syncedConnections: 0,
+        usedFixtureData: false,
       }),
     );
   });
