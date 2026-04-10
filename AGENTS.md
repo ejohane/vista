@@ -9,12 +9,12 @@ It documents the commands and coding conventions actually used in this repositor
   - `bun install`
 - Ensure git hooks are installed (runs on install via `prepare`):
   - `bun run prepare`
-- Start full local dev flow (typegen, migrate, seed-if-needed, web + sync workers):
+- Start full local dev flow (typegen, migrate, empty local DB, web + sync workers):
   - `bun run dev`
 - Start the full local dev flow from a non-`main` git worktree:
   - `bun run dev:worktree`
 - Use `bun run dev` in the main worktree and `bun run dev:worktree` in secondary worktrees so local ports, `.env.local`, and Wrangler state are isolated safely.
-- Start dev without seeding demo data:
+- Start dev with the same fresh-local-DB flow (legacy alias):
   - `bun run dev:empty`
 
 ## Build, Lint, Typecheck, Test

@@ -30,8 +30,6 @@ const syncWranglerBin = path.join(
 );
 const defaultWebPort = 5173;
 const defaultSyncPort = 8788;
-const shouldSkipSeed =
-  process.argv.includes("--skip-seed") || process.env.VISTA_SKIP_SEED === "1";
 const { filePath: localEnvFilePath, values: localEnv } =
   loadLocalEnvFile(rootDir);
 const commandEnv = {
@@ -143,12 +141,9 @@ async function ensureLocalDbReady() {
     return;
   }
 
-  if (shouldSkipSeed) {
-    logStep("Leaving local D1 empty for provider onboarding.");
-    return;
-  }
-
-  await runCommand(["bun", "run", "db:seed:local"], "Seeding local D1");
+  logStep(
+    "Leaving local D1 empty until you connect a real provider or seed demo data manually.",
+  );
 }
 
 function spawnService(
