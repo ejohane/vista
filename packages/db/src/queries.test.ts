@@ -575,6 +575,113 @@ describe("getDashboardSnapshot", () => {
     expect(snapshot?.totals.netWorthMinor).toBe(45574310);
   });
 
+  test("aggregates household totals across staggered connection syncs", async () => {
+    const { db, sqlite } = createTestDb();
+    const earlierBankCompletedAt = new Date("2026-03-15T18:30:00.000Z");
+    const investmentCompletedAt = new Date("2026-03-16T09:00:00.000Z");
+    const bankCompletedAt = new Date("2026-03-16T18:30:00.000Z");
+
+    insertProviderConnection(sqlite, {
+      accessToken: "plaid-access-token-bank",
+      connectionId: "conn_plaid_bank",
+      externalConnectionId: "plaid_bank",
+      provider: "plaid",
+      status: "active",
+    });
+    insertProviderConnection(sqlite, {
+      accessToken: "plaid-access-token-investments",
+      connectionId: "conn_plaid_investments",
+      externalConnectionId: "plaid_investments",
+      provider: "plaid",
+      status: "active",
+    });
+
+    insertSucceededRun(sqlite, {
+      balances: {
+        acct_checking: 1240000,
+        acct_savings: 3500000,
+      },
+      completedAt: earlierBankCompletedAt,
+      provider: "plaid",
+      providerConnectionId: "conn_plaid_bank",
+      runId: "sync_seed_2026_03_15_bank",
+      startedAt: new Date("2026-03-15T18:25:00.000Z"),
+    });
+    insertSucceededRun(sqlite, {
+      balances: {
+        acct_brokerage: 16180000,
+        acct_retirement: 24280000,
+      },
+      completedAt: investmentCompletedAt,
+      provider: "plaid",
+      providerConnectionId: "conn_plaid_investments",
+      runId: "sync_seed_2026_03_16_investments",
+      startedAt: new Date("2026-03-16T08:55:00.000Z"),
+    });
+    insertSucceededRun(sqlite, {
+      balances: {
+        acct_checking: 1284500,
+        acct_savings: 3527600,
+      },
+      completedAt: bankCompletedAt,
+      provider: "plaid",
+      providerConnectionId: "conn_plaid_bank",
+      runId: "sync_seed_2026_03_16_bank",
+      startedAt: new Date("2026-03-16T18:25:00.000Z"),
+    });
+
+    const snapshot = await getDashboardSnapshot(db);
+
+    expect(snapshot?.hasSuccessfulSync).toBe(true);
+    expect(snapshot?.totals).toEqual({
+      cashMinor: 4812100,
+      investmentsMinor: 40460000,
+      netWorthMinor: 45272100,
+    });
+    expect(snapshot?.changeSummary).toEqual({
+      cashDeltaMinor: 72100,
+      changedAccounts: [
+        {
+          accountType: "checking",
+          deltaMinor: 44500,
+          id: "acct_checking",
+          institutionName: "US Bank",
+          latestBalanceMinor: 1284500,
+          name: "Everyday Checking",
+          previousBalanceMinor: 1240000,
+        },
+        {
+          accountType: "savings",
+          deltaMinor: 27600,
+          id: "acct_savings",
+          institutionName: "US Bank",
+          latestBalanceMinor: 3527600,
+          name: "Rainy Day Savings",
+          previousBalanceMinor: 3500000,
+        },
+      ],
+      changedGroups: [
+        {
+          deltaMinor: 44500,
+          key: "checking",
+          label: "Checking",
+          latestTotalMinor: 1284500,
+          previousTotalMinor: 1240000,
+        },
+        {
+          deltaMinor: 27600,
+          key: "savings",
+          label: "Savings",
+          latestTotalMinor: 3527600,
+          previousTotalMinor: 3500000,
+        },
+      ],
+      comparedToCompletedAt: investmentCompletedAt,
+      investmentsDeltaMinor: 0,
+      netWorthDeltaMinor: 72100,
+    });
+  });
+
   test("honors account curation for display names, reporting exclusion, and hidden presentation", async () => {
     const { db, sqlite } = createTestDb();
 
@@ -826,6 +933,96 @@ describe("getHomepageSnapshot", () => {
         latestRunStatus: "never",
         provider: "plaid",
         status: "error",
+      },
+    ]);
+  });
+
+  test("keeps household history and totals intact when the latest sync only updates one connection", async () => {
+    const { db, sqlite } = createTestDb();
+    const earlierBankCompletedAt = new Date("2026-03-15T18:30:00.000Z");
+    const investmentCompletedAt = new Date("2026-03-16T09:00:00.000Z");
+    const bankCompletedAt = new Date("2026-03-16T18:30:00.000Z");
+
+    insertProviderConnection(sqlite, {
+      accessToken: "plaid-access-token-bank",
+      connectionId: "conn_plaid_bank",
+      externalConnectionId: "plaid_bank",
+      provider: "plaid",
+      status: "active",
+    });
+    insertProviderConnection(sqlite, {
+      accessToken: "plaid-access-token-investments",
+      connectionId: "conn_plaid_investments",
+      externalConnectionId: "plaid_investments",
+      provider: "plaid",
+      status: "active",
+    });
+
+    insertSucceededRun(sqlite, {
+      balances: {
+        acct_checking: 1240000,
+        acct_savings: 3500000,
+      },
+      completedAt: earlierBankCompletedAt,
+      provider: "plaid",
+      providerConnectionId: "conn_plaid_bank",
+      runId: "sync_seed_2026_03_15_bank",
+      startedAt: new Date("2026-03-15T18:25:00.000Z"),
+    });
+    insertSucceededRun(sqlite, {
+      balances: {
+        acct_brokerage: 16180000,
+        acct_retirement: 24280000,
+      },
+      completedAt: investmentCompletedAt,
+      provider: "plaid",
+      providerConnectionId: "conn_plaid_investments",
+      runId: "sync_seed_2026_03_16_investments",
+      startedAt: new Date("2026-03-16T08:55:00.000Z"),
+    });
+    insertSucceededRun(sqlite, {
+      balances: {
+        acct_checking: 1284500,
+        acct_savings: 3527600,
+      },
+      completedAt: bankCompletedAt,
+      provider: "plaid",
+      providerConnectionId: "conn_plaid_bank",
+      runId: "sync_seed_2026_03_16_bank",
+      startedAt: new Date("2026-03-16T18:25:00.000Z"),
+    });
+
+    const snapshot = await getHomepageSnapshot(db);
+
+    expect(snapshot?.totals).toEqual({
+      cashMinor: 4812100,
+      investmentsMinor: 40460000,
+      netWorthMinor: 45272100,
+    });
+    expect(snapshot?.changeSummary).toEqual({
+      netWorthDeltaMinor: 72100,
+    });
+    expect(snapshot?.history).toEqual([
+      {
+        cashMinor: 4740000,
+        completedAt: earlierBankCompletedAt.toISOString(),
+        investmentsMinor: 0,
+        liabilitiesMinor: 0,
+        netWorthMinor: 4740000,
+      },
+      {
+        cashMinor: 4740000,
+        completedAt: investmentCompletedAt.toISOString(),
+        investmentsMinor: 40460000,
+        liabilitiesMinor: 0,
+        netWorthMinor: 45200000,
+      },
+      {
+        cashMinor: 4812100,
+        completedAt: bankCompletedAt.toISOString(),
+        investmentsMinor: 40460000,
+        liabilitiesMinor: 0,
+        netWorthMinor: 45272100,
       },
     ]);
   });

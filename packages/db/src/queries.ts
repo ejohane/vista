@@ -71,6 +71,12 @@ type SyncRunSummary = {
   id: string;
 };
 
+type HouseholdSnapshotPoint = {
+  accounts: HouseholdAccountSnapshot[];
+  completedAt: Date;
+  runId: string;
+};
+
 type ResolvedHousehold = {
   id: string;
   lastSyncedAt: Date;
@@ -379,6 +385,104 @@ async function loadHouseholdAccounts(
   return normalizedRows;
 }
 
+async function loadHouseholdSnapshotHistory(
+  db: DashboardDb,
+  householdId: string,
+): Promise<HouseholdSnapshotPoint[]> {
+  const successfulRuns = (
+    await db
+      .select({
+        completedAt: syncRuns.completedAt,
+        id: syncRuns.id,
+      })
+      .from(syncRuns)
+      .where(
+        and(
+          eq(syncRuns.householdId, householdId),
+          eq(syncRuns.status, "succeeded"),
+        ),
+      )
+      .orderBy(desc(syncRuns.completedAt), desc(syncRuns.startedAt))
+  ).filter((run): run is { completedAt: Date; id: string } => {
+    return run.completedAt instanceof Date;
+  });
+
+  if (!successfulRuns.length) {
+    return [];
+  }
+
+  const snapshotRows = await db
+    .select({
+      accountId: accounts.id,
+      accountType: accounts.accountType,
+      balanceMinor: balanceSnapshots.balanceMinor,
+      displayName: accounts.displayName,
+      includeInHouseholdReporting: accounts.includeInHouseholdReporting,
+      institutionName: accounts.institutionName,
+      isHidden: accounts.isHidden,
+      name: accounts.name,
+      reportingGroup: accounts.reportingGroup,
+      sourceSyncRunId: balanceSnapshots.sourceSyncRunId,
+    })
+    .from(balanceSnapshots)
+    .innerJoin(
+      accounts,
+      and(
+        eq(balanceSnapshots.accountId, accounts.id),
+        eq(accounts.householdId, householdId),
+      ),
+    )
+    .where(
+      inArray(
+        balanceSnapshots.sourceSyncRunId,
+        successfulRuns.map((run) => run.id),
+      ),
+    );
+
+  const normalizedSnapshotRows = snapshotRows.map((account) => ({
+    ...account,
+    name: account.displayName ?? account.name,
+  }));
+
+  normalizedSnapshotRows.forEach((account) => {
+    assertValidAccount(account, householdId);
+  });
+
+  const rowsByRunId = normalizedSnapshotRows.reduce<
+    Map<string, HouseholdAccountSnapshot[]>
+  >((result, account) => {
+    const existingRows = result.get(account.sourceSyncRunId);
+
+    if (existingRows) {
+      existingRows.push(account);
+      return result;
+    }
+
+    result.set(account.sourceSyncRunId, [account]);
+    return result;
+  }, new Map());
+
+  const latestAccountById = new Map<string, HouseholdAccountSnapshot>();
+
+  return [...successfulRuns].reverse().flatMap((run) => {
+    for (const account of rowsByRunId.get(run.id) ?? []) {
+      latestAccountById.set(account.accountId, account);
+    }
+
+    if (latestAccountById.size === 0) {
+      return [];
+    }
+
+    return [
+      {
+        accounts: Array.from(latestAccountById.values()),
+        completedAt: run.completedAt,
+        runId: run.id,
+      },
+    ];
+  });
+}
+
 async function loadHomepageConnectionStates(
   db: DashboardDb,
   householdId: string,
@@ -575,28 +679,13 @@ export async function getDashboardSnapshot(
   }
 
   const resolvedHouseholdId = household.id;
-  const successfulRuns = (
-    await db
-      .select({
-        completedAt: syncRuns.completedAt,
-        id: syncRuns.id,
-      })
-      .from(syncRuns)
-      .where(
-        and(
-          eq(syncRuns.householdId, resolvedHouseholdId),
-          eq(syncRuns.status, "succeeded"),
-        ),
-      )
-      .orderBy(desc(syncRuns.completedAt), desc(syncRuns.startedAt))
-      .limit(2)
-  ).filter((run): run is { completedAt: Date; id: string } => {
-    return run.completedAt instanceof Date;
-  });
+  const snapshotHistory = await loadHouseholdSnapshotHistory(
+    db,
+    resolvedHouseholdId,
+  );
+  const latestSnapshotPoint = snapshotHistory[snapshotHistory.length - 1];
 
-  const latestRun = successfulRuns[0];
-
-  if (!latestRun) {
+  if (!latestSnapshotPoint) {
     const legacyAccounts = filterReportingAccounts(
       await loadHouseholdAccounts(db, resolvedHouseholdId),
     );
@@ -612,65 +701,35 @@ export async function getDashboardSnapshot(
       totals: buildTotals(legacyAccounts),
     };
   }
-
-  const runIds = successfulRuns.map((run) => run.id);
-  const snapshotRows = await db
-    .select({
-      accountId: accounts.id,
-      accountType: accounts.accountType,
-      balanceMinor: balanceSnapshots.balanceMinor,
-      displayName: accounts.displayName,
-      includeInHouseholdReporting: accounts.includeInHouseholdReporting,
-      institutionName: accounts.institutionName,
-      isHidden: accounts.isHidden,
-      name: accounts.name,
-      reportingGroup: accounts.reportingGroup,
-      sourceSyncRunId: balanceSnapshots.sourceSyncRunId,
-    })
-    .from(balanceSnapshots)
-    .innerJoin(
-      accounts,
-      and(
-        eq(balanceSnapshots.accountId, accounts.id),
-        eq(accounts.householdId, resolvedHouseholdId),
-      ),
-    )
-    .where(inArray(balanceSnapshots.sourceSyncRunId, runIds));
-
-  const normalizedSnapshotRows = snapshotRows.map((account) => ({
-    ...account,
-    name: account.displayName ?? account.name,
-  }));
-
-  normalizedSnapshotRows.forEach((account) => {
-    assertValidAccount(account, resolvedHouseholdId);
-  });
-
-  const latestAccounts = normalizedSnapshotRows.filter(
-    (account) => account.sourceSyncRunId === latestRun.id,
+  const previousSnapshotPoint = snapshotHistory[snapshotHistory.length - 2];
+  const latestReportingAccounts = filterReportingAccounts(
+    latestSnapshotPoint.accounts,
   );
-  const previousRun = successfulRuns[1];
-  const previousAccounts = previousRun
-    ? normalizedSnapshotRows.filter(
-        (account) => account.sourceSyncRunId === previousRun.id,
-      )
-    : [];
-  const latestReportingAccounts = filterReportingAccounts(latestAccounts);
-  const previousReportingAccounts = filterReportingAccounts(previousAccounts);
+  const previousReportingAccounts = filterReportingAccounts(
+    previousSnapshotPoint?.accounts ?? [],
+  );
 
   return {
     accountTypeGroups: buildAccountTypeGroups(
       filterVisibleAccounts(latestReportingAccounts),
     ),
     changeSummary: buildChangeSummary(
-      latestRun,
-      previousRun,
+      {
+        completedAt: latestSnapshotPoint.completedAt,
+        id: latestSnapshotPoint.runId,
+      },
+      previousSnapshotPoint
+        ? {
+            completedAt: previousSnapshotPoint.completedAt,
+            id: previousSnapshotPoint.runId,
+          }
+        : undefined,
       latestReportingAccounts,
       previousReportingAccounts,
     ),
     hasSuccessfulSync: true,
     householdName: household.name,
-    lastSyncedAt: latestRun.completedAt,
+    lastSyncedAt: latestSnapshotPoint.completedAt,
     totals: buildTotals(latestReportingAccounts),
   };
 }
@@ -696,100 +755,31 @@ export async function getNetWorthHistory(
 
   const resolvedHouseholdId = household.id;
 
-  const runs = await db
-    .select({
-      completedAt: syncRuns.completedAt,
-      id: syncRuns.id,
-    })
-    .from(syncRuns)
-    .where(
-      and(
-        eq(syncRuns.householdId, resolvedHouseholdId),
-        eq(syncRuns.status, "succeeded"),
-      ),
-    )
-    .orderBy(desc(syncRuns.completedAt), desc(syncRuns.startedAt))
-    .limit(limit);
-
-  const validRuns = runs.filter(
-    (run): run is { completedAt: Date; id: string } =>
-      run.completedAt instanceof Date,
+  const snapshotHistory = await loadHouseholdSnapshotHistory(
+    db,
+    resolvedHouseholdId,
   );
 
-  if (!validRuns.length) {
+  if (!snapshotHistory.length) {
     return [];
   }
 
-  const runIds = validRuns.map((run) => run.id);
+  return snapshotHistory.slice(-limit).map((point) => {
+    const reportingAccounts = filterReportingAccounts(point.accounts);
+    const totals = buildTotals(reportingAccounts);
 
-  const snapshotRows = await db
-    .select({
-      accountId: accounts.id,
-      balanceMinor: balanceSnapshots.balanceMinor,
-      includeInHouseholdReporting: accounts.includeInHouseholdReporting,
-      reportingGroup: accounts.reportingGroup,
-      sourceSyncRunId: balanceSnapshots.sourceSyncRunId,
-    })
-    .from(balanceSnapshots)
-    .innerJoin(
-      accounts,
-      and(
-        eq(balanceSnapshots.accountId, accounts.id),
-        eq(accounts.householdId, resolvedHouseholdId),
-      ),
-    )
-    .where(inArray(balanceSnapshots.sourceSyncRunId, runIds));
-
-  const pointsByRun = new Map<
-    string,
-    {
-      cashMinor: number;
-      investmentsMinor: number;
-      liabilitiesMinor: number;
-      netWorthMinor: number;
-    }
-  >();
-
-  for (const row of snapshotRows) {
-    if (!row.includeInHouseholdReporting) continue;
-
-    let point = pointsByRun.get(row.sourceSyncRunId);
-    if (!point) {
-      point = {
-        cashMinor: 0,
-        investmentsMinor: 0,
-        liabilitiesMinor: 0,
-        netWorthMinor: 0,
-      };
-      pointsByRun.set(row.sourceSyncRunId, point);
-    }
-
-    point.netWorthMinor += row.balanceMinor;
-
-    if (row.reportingGroup === "cash") {
-      point.cashMinor += row.balanceMinor;
-    } else if (row.reportingGroup === "investments") {
-      point.investmentsMinor += row.balanceMinor;
-    } else if (row.reportingGroup === "liabilities") {
-      point.liabilitiesMinor += row.balanceMinor;
-    }
-  }
-
-  return validRuns
-    .filter((run) => pointsByRun.has(run.id))
-    .map((run) => {
-      const point = pointsByRun.get(run.id);
-      if (!point) {
-        return null;
-      }
-
-      return {
-        ...point,
-        completedAt: run.completedAt.toISOString(),
-      };
-    })
-    .filter((point) => point !== null)
-    .reverse();
+    return {
+      cashMinor: totals.cashMinor,
+      completedAt: point.completedAt.toISOString(),
+      investmentsMinor: totals.investmentsMinor,
+      liabilitiesMinor: reportingAccounts.reduce((result, account) => {
+        return account.reportingGroup === "liabilities"
+          ? result + account.balanceMinor
+          : result;
+      }, 0),
+      netWorthMinor: totals.netWorthMinor,
+    };
+  });
 }
 
 export async function getHomepageSnapshot(
