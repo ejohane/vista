@@ -1,7 +1,5 @@
 DELETE FROM holding_snapshots;
 DELETE FROM holdings;
-DELETE FROM transactions;
-DELETE FROM sync_checkpoints;
 DELETE FROM balance_snapshots;
 DELETE FROM sync_runs;
 DELETE FROM accounts;

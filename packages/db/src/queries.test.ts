@@ -196,7 +196,7 @@ function insertSucceededRun(
   values: {
     balances: Record<string, number>;
     completedAt: Date;
-    provider?: "plaid" | "simplefin" | "snaptrade";
+    provider?: "plaid";
     providerConnectionId?: string;
     runId: string;
     startedAt: Date;
@@ -275,7 +275,7 @@ function insertProviderConnection(
     accessUrl?: null | string;
     connectionId: string;
     externalConnectionId: string;
-    provider: "plaid" | "simplefin" | "snaptrade";
+    provider: "plaid";
     status: "active" | "disconnected" | "error";
   },
 ) {

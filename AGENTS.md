@@ -62,8 +62,19 @@ It documents the commands and coding conventions actually used in this repositor
   - `bun run db:migrate:local`
 - Seed local D1 demo data:
   - `bun run db:seed:local`
+- Launch Drizzle Studio against the current worktree's local D1 SQLite file:
+  - `bun run db:studio:local`
+- Launch Drizzle Studio on a custom port/host:
+  - `bun run db:studio:local --port 4984 --host 127.0.0.1`
 - Reset local dev environment:
   - `bun run dev:reset`
+
+Drizzle Studio notes:
+
+- `bun run db:studio:local` resolves the SQLite file inside `apps/web/.wrangler/state` and points Studio at that file.
+- In the main worktree, it uses that worktree's local D1 state directly.
+- In a secondary worktree, if no local Wrangler state exists yet, it seeds `apps/web/.wrangler/state` from the main worktree first, matching the `bun run dev:worktree` behavior.
+- If no local state exists anywhere yet, it runs `bun run db:migrate:local` to initialize an empty local database before launching Studio.
 
 ## Cursor / Copilot Rule Files
 

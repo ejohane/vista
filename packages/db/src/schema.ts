@@ -14,7 +14,7 @@ export type SyncRunStatus = (typeof syncRunStatuses)[number];
 export const syncRunTriggers = ["seed", "scheduled"] as const;
 export type SyncRunTrigger = (typeof syncRunTriggers)[number];
 
-export const providerTypes = ["plaid", "simplefin", "snaptrade"] as const;
+export const providerTypes = ["plaid"] as const;
 export type ProviderType = (typeof providerTypes)[number];
 
 export const providerConnectionStatuses = [
@@ -43,9 +43,6 @@ export type AccountType = (typeof accountTypes)[number];
 
 export const reportingGroups = ["cash", "liabilities", "investments"] as const;
 export type ReportingGroup = (typeof reportingGroups)[number];
-
-export const transactionDirections = ["credit", "debit"] as const;
-export type TransactionDirection = (typeof transactionDirections)[number];
 
 export const holdingAssetClasses = [
   "cash",
@@ -90,7 +87,7 @@ export const providerConnections = sqliteTable(
   (table) => [
     check(
       "provider_connections_provider_check",
-      sql`${table.provider} in ('simplefin', 'snaptrade', 'plaid')`,
+      sql`${table.provider} in ('plaid')`,
     ),
     check(
       "provider_connections_status_check",
@@ -242,7 +239,7 @@ export const syncRuns = sqliteTable(
     ),
     check(
       "sync_runs_provider_check",
-      sql`${table.provider} is null or ${table.provider} in ('simplefin', 'snaptrade', 'plaid')`,
+      sql`${table.provider} is null or ${table.provider} in ('plaid')`,
     ),
     index("sync_runs_household_idx").on(table.householdId),
     index("sync_runs_household_completed_idx").on(
@@ -273,70 +270,6 @@ export const balanceSnapshots = sqliteTable(
     uniqueIndex("balance_snapshots_account_run_idx").on(
       table.accountId,
       table.sourceSyncRunId,
-    ),
-  ],
-);
-
-export const syncCheckpoints = sqliteTable(
-  "sync_checkpoints",
-  {
-    cursor: text("cursor"),
-    id: text("id").primaryKey(),
-    providerConnectionId: text("provider_connection_id")
-      .notNull()
-      .references(() => providerConnections.id),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-  },
-  (table) => [
-    uniqueIndex("sync_checkpoints_connection_idx").on(
-      table.providerConnectionId,
-    ),
-  ],
-);
-
-export const transactions = sqliteTable(
-  "transactions",
-  {
-    accountId: text("account_id")
-      .notNull()
-      .references(() => accounts.id),
-    amountMinor: integer("amount_minor").notNull(),
-    categoryNormalized: text("category_normalized"),
-    categoryRaw: text("category_raw"),
-    description: text("description").notNull(),
-    direction: text("direction", {
-      enum: transactionDirections,
-    }).notNull(),
-    excludeFromReporting: integer("exclude_from_reporting", {
-      mode: "boolean",
-    })
-      .notNull()
-      .default(false),
-    id: text("id").primaryKey(),
-    merchantName: text("merchant_name"),
-    postedAt: integer("posted_at", { mode: "timestamp_ms" }).notNull(),
-    providerTransactionId: text("provider_transaction_id").notNull(),
-    sourceSyncRunId: text("source_sync_run_id")
-      .notNull()
-      .references(() => syncRuns.id),
-  },
-  (table) => [
-    check(
-      "transactions_direction_check",
-      sql`${table.direction} in ('credit', 'debit')`,
-    ),
-    check(
-      "transactions_exclude_from_reporting_check",
-      sql`${table.excludeFromReporting} in (0, 1)`,
-    ),
-    index("transactions_account_posted_idx").on(
-      table.accountId,
-      table.postedAt,
-    ),
-    index("transactions_run_idx").on(table.sourceSyncRunId),
-    uniqueIndex("transactions_account_provider_idx").on(
-      table.accountId,
-      table.providerTransactionId,
     ),
   ],
 );

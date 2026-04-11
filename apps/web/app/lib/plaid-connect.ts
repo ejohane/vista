@@ -3,10 +3,6 @@ import { createPlaidClient, type PlaidClient } from "@vista/plaid";
 const DEFAULT_HOUSEHOLD_ID = "household_default";
 const DEFAULT_HOUSEHOLD_NAME = "Vista Household";
 const PLAID_REQUIRED_PRODUCTS = ["investments"] as const;
-const PLAID_REQUIRED_IF_SUPPORTED_PRODUCTS = [
-  "transactions",
-  "liabilities",
-] as const;
 
 type CreatePlaidLinkTokenArgs = {
   client?: PlaidClient;
@@ -137,7 +133,6 @@ export async function createPlaidLinkToken(
   const result = await client.createLinkToken({
     countryCodes: args.countryCodes,
     products: [...PLAID_REQUIRED_PRODUCTS],
-    requiredIfSupportedProducts: [...PLAID_REQUIRED_IF_SUPPORTED_PRODUCTS],
     redirectUri: args.redirectUrl,
     userId: householdId,
   });

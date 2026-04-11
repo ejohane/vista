@@ -15,6 +15,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply vista-dev --local --config apps/web/wrangler.jsonc",
     "db:seed:local": "wrangler d1 execute vista-dev --local --config apps/web/wrangler.jsonc --file packages/db/seeds/dev.sql",
+    "db:studio:local": "bun run scripts/db-studio-local.ts",
     "dev": "bun run scripts/dev.ts",
     "dev:empty": "bun run scripts/dev.ts",
     "dev:reset": "./scripts/dev-reset.sh",
@@ -29,6 +30,7 @@
     "typecheck": "bun run --cwd packages/db typecheck && bun run --cwd packages/plaid typecheck && bun run --cwd apps/sync typecheck && bun run --cwd apps/web typecheck"
   },
   "devDependencies": {
+    "@libsql/client": "^0.15.15",
     "@biomejs/biome": "^2.1.4",
     "bun-types": "^1.3.10",
     "drizzle-kit": "^0.31.4",

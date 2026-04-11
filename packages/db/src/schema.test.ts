@@ -23,7 +23,7 @@ function createSchemaTestDatabase() {
   return sqlite;
 }
 
-describe("schema foundation for provider-backed sync", () => {
+describe("schema foundation for Plaid-backed sync", () => {
   test("supports provider connections, provider accounts, and canonical account curation defaults", () => {
     const sqlite = createSchemaTestDatabase();
     const createdAt = new Date("2026-03-18T00:00:00.000Z").getTime();
@@ -53,11 +53,11 @@ describe("schema foundation for provider-backed sync", () => {
         `,
       )
       .run(
-        "conn_simplefin_us_bank",
+        "conn_plaid_us_bank",
         "household_demo",
-        "simplefin",
+        "plaid",
         "active",
-        "simplefin-demo-connection",
+        "plaid-demo-connection",
         createdAt,
         createdAt,
       );
@@ -82,8 +82,8 @@ describe("schema foundation for provider-backed sync", () => {
       )
       .run(
         "prov_acct_checking",
-        "conn_simplefin_us_bank",
-        "simplefin-account-123",
+        "conn_plaid_us_bank",
+        "plaid-account-123",
         "US Bank Platinum Checking",
         "US Bank",
         "checking",
@@ -180,11 +180,11 @@ describe("schema foundation for provider-backed sync", () => {
         `,
       )
       .run(
-        "conn_simplefin_us_bank",
+        "conn_plaid_us_bank",
         "household_demo",
-        "simplefin",
+        "plaid",
         "active",
-        "simplefin-demo-connection",
+        "plaid-demo-connection",
         createdAt,
         createdAt,
       );
@@ -209,8 +209,8 @@ describe("schema foundation for provider-backed sync", () => {
       )
       .run(
         "prov_acct_credit_card",
-        "conn_simplefin_us_bank",
-        "simplefin-account-cc-123",
+        "conn_plaid_us_bank",
+        "plaid-account-cc-123",
         "Primary Credit Card",
         "US Bank",
         "credit_card",
@@ -269,72 +269,6 @@ describe("schema foundation for provider-backed sync", () => {
       balanceMinor: -12345,
       reportingGroup: "liabilities",
     });
-  });
-
-  test("enforces one checkpoint per provider connection", () => {
-    const sqlite = createSchemaTestDatabase();
-    const createdAt = new Date("2026-03-18T00:00:00.000Z").getTime();
-
-    sqlite
-      .query(
-        `
-          insert into households (id, name, last_synced_at, created_at)
-          values (?, ?, ?, ?)
-        `,
-      )
-      .run("household_demo", "Vista Household", createdAt, createdAt);
-    sqlite
-      .query(
-        `
-          insert into provider_connections (
-            id,
-            household_id,
-            provider,
-            status,
-            external_connection_id,
-            created_at,
-            updated_at
-          )
-          values (?, ?, ?, ?, ?, ?, ?)
-        `,
-      )
-      .run(
-        "conn_simplefin_us_bank",
-        "household_demo",
-        "simplefin",
-        "active",
-        "simplefin-demo-connection",
-        createdAt,
-        createdAt,
-      );
-
-    const insertCheckpoint = sqlite.query(
-      `
-        insert into sync_checkpoints (
-          id,
-          provider_connection_id,
-          cursor,
-          updated_at
-        )
-        values (?, ?, ?, ?)
-      `,
-    );
-
-    insertCheckpoint.run(
-      "checkpoint_simplefin_1",
-      "conn_simplefin_us_bank",
-      "cursor-1",
-      createdAt,
-    );
-
-    expect(() =>
-      insertCheckpoint.run(
-        "checkpoint_simplefin_2",
-        "conn_simplefin_us_bank",
-        "cursor-2",
-        createdAt,
-      ),
-    ).toThrow();
   });
 
   test("supports Plaid-backed liability account types", () => {
@@ -464,7 +398,7 @@ describe("schema foundation for provider-backed sync", () => {
     });
   });
 
-  test("stores provider-linked sync runs and deduplicates transactions by account and provider transaction id", () => {
+  test("stores provider-linked sync runs with error details", () => {
     const sqlite = createSchemaTestDatabase();
     const createdAt = new Date("2026-03-18T00:00:00.000Z").getTime();
 
@@ -492,11 +426,11 @@ describe("schema foundation for provider-backed sync", () => {
         `,
       )
       .run(
-        "conn_simplefin_us_bank",
+        "conn_plaid_us_bank",
         "household_demo",
-        "simplefin",
+        "plaid",
         "active",
-        "simplefin-demo-connection",
+        "plaid-demo-connection",
         createdAt,
         createdAt,
       );
@@ -519,8 +453,8 @@ describe("schema foundation for provider-backed sync", () => {
       )
       .run(
         "prov_acct_checking",
-        "conn_simplefin_us_bank",
-        "simplefin-account-123",
+        "conn_plaid_us_bank",
+        "plaid-account-123",
         "US Bank Platinum Checking",
         "US Bank",
         "checking",
@@ -578,14 +512,14 @@ describe("schema foundation for provider-backed sync", () => {
         `,
       )
       .run(
-        "sync_simplefin_2026_03_18",
+        "sync_plaid_2026_03_18",
         "household_demo",
-        "conn_simplefin_us_bank",
-        "simplefin",
+        "conn_plaid_us_bank",
+        "plaid",
         "failed",
         "scheduled",
         3,
-        "Provider returned malformed transaction payload.",
+        "Plaid returned malformed account payload.",
         createdAt,
         createdAt,
       );
@@ -603,65 +537,13 @@ describe("schema foundation for provider-backed sync", () => {
             where id = ?
           `,
         )
-        .get("sync_simplefin_2026_03_18"),
+        .get("sync_plaid_2026_03_18"),
     ).toEqual({
-      errorSummary: "Provider returned malformed transaction payload.",
-      provider: "simplefin",
-      providerConnectionId: "conn_simplefin_us_bank",
+      errorSummary: "Plaid returned malformed account payload.",
+      provider: "plaid",
+      providerConnectionId: "conn_plaid_us_bank",
       recordsChanged: 3,
     });
-
-    const insertTransaction = sqlite.query(
-      `
-        insert into transactions (
-          id,
-          account_id,
-          provider_transaction_id,
-          posted_at,
-          amount_minor,
-          direction,
-          description,
-          merchant_name,
-          category_raw,
-          category_normalized,
-          exclude_from_reporting,
-          source_sync_run_id
-        )
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-    );
-
-    insertTransaction.run(
-      "txn_1",
-      "acct_checking",
-      "simplefin-txn-123",
-      createdAt,
-      -4500,
-      "debit",
-      "Coffee Shop",
-      "Coffee Shop",
-      "Food and Drink",
-      null,
-      0,
-      "sync_simplefin_2026_03_18",
-    );
-
-    expect(() =>
-      insertTransaction.run(
-        "txn_2",
-        "acct_checking",
-        "simplefin-txn-123",
-        createdAt,
-        -4500,
-        "debit",
-        "Coffee Shop",
-        "Coffee Shop",
-        "Food and Drink",
-        null,
-        0,
-        "sync_simplefin_2026_03_18",
-      ),
-    ).toThrow();
   });
 
   test("stores canonical holdings and deduplicates holding snapshots by holding and sync run", () => {
@@ -721,9 +603,9 @@ describe("schema foundation for provider-backed sync", () => {
         `,
       )
       .run(
-        "sync_snaptrade_1",
+        "sync_plaid_1",
         "household_demo",
-        "snaptrade",
+        "plaid",
         "succeeded",
         "scheduled",
         7,
@@ -799,7 +681,7 @@ describe("schema foundation for provider-backed sync", () => {
       "holding_snapshot_vti_sync_1",
       "holding_vti",
       "acct_brokerage",
-      "sync_snaptrade_1",
+      "sync_plaid_1",
       createdAt,
       "2026-03-18",
       "10",
@@ -813,7 +695,7 @@ describe("schema foundation for provider-backed sync", () => {
         "holding_snapshot_vti_sync_1_duplicate",
         "holding_vti",
         "acct_brokerage",
-        "sync_snaptrade_1",
+        "sync_plaid_1",
         createdAt,
         "2026-03-18",
         "10",

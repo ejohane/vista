@@ -172,9 +172,9 @@ function createPortfolioTestDb() {
       `,
     )
     .run(
-      "sync_snaptrade_2026_03_18",
+      "sync_plaid_2026_03_18",
       "household_demo",
-      "snaptrade",
+      "plaid",
       "succeeded",
       "scheduled",
       14,
@@ -303,7 +303,7 @@ function createPortfolioTestDb() {
       `${holding.holdingId}_snapshot`,
       holding.holdingId,
       holding.accountId,
-      "sync_snaptrade_2026_03_18",
+      "sync_plaid_2026_03_18",
       completedAt,
       "2026-03-18",
       holding.quantity,
