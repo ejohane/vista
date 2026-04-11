@@ -655,9 +655,9 @@ export default function ConnectPlaid() {
                 </p>
                 <p className="mt-3 text-sm leading-6 text-muted-foreground">
                   A successful Plaid Link session is exchanged server-side and
-                  immediately runs the first sync. This slice currently imports
-                  Plaid accounts and balances; holdings and richer liability
-                  detail are not synced yet.
+                  immediately runs the first sync. This slice imports Plaid
+                  accounts, balances, and holdings when the institution returns
+                  them; richer liability detail is still not synced yet.
                 </p>
               </div>
               <div className="rounded-2xl border border-border/70 bg-background/75 p-4">

@@ -99,6 +99,9 @@ describe("exchangePlaidPublicToken", () => {
         getAccounts: async () => {
           throw new Error("getAccounts should not be called");
         },
+        getInvestmentsHoldings: async () => {
+          throw new Error("getInvestmentsHoldings should not be called");
+        },
       },
       database: d1,
       now: new Date("2026-03-26T21:00:00.000Z"),
@@ -133,6 +136,9 @@ describe("exchangePlaidPublicToken", () => {
         }),
         getAccounts: async () => {
           throw new Error("getAccounts should not be called");
+        },
+        getInvestmentsHoldings: async () => {
+          throw new Error("getInvestmentsHoldings should not be called");
         },
       },
       database: d1,

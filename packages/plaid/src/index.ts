@@ -16,6 +16,35 @@ type PlaidApiAccount = {
   type: string;
 };
 
+type PlaidApiHolding = {
+  account_id: string;
+  cost_basis?: null | number;
+  institution_price: number;
+  institution_price_as_of?: null | string;
+  institution_price_datetime?: null | string;
+  institution_value: number;
+  iso_currency_code?: null | string;
+  quantity: number;
+  security_id: string;
+  unofficial_currency_code?: null | string;
+};
+
+type PlaidApiSecurity = {
+  close_price?: null | number;
+  close_price_as_of?: null | string;
+  institution_id?: null | string;
+  institution_security_id?: null | string;
+  is_cash_equivalent?: null | boolean;
+  iso_currency_code?: null | string;
+  name?: null | string;
+  security_id: string;
+  subtype?: null | string;
+  ticker_symbol?: null | string;
+  type?: null | string;
+  unofficial_currency_code?: null | string;
+  update_datetime?: null | string;
+};
+
 type PlaidClientConfig = {
   clientId: string;
   environment?: PlaidEnvironment;
@@ -86,6 +115,11 @@ export type PlaidClient = {
       item_id?: string;
     };
   }>;
+  getInvestmentsHoldings(args: { accessToken: string }): Promise<{
+    accounts: PlaidApiAccount[];
+    holdings: PlaidApiHolding[];
+    securities: PlaidApiSecurity[];
+  }>;
 };
 
 function resolvePlaidBaseUrl(environment: PlaidEnvironment = "sandbox") {
@@ -116,6 +150,18 @@ function snapshotId(runIdValue: string, accountId: string) {
   return `snapshot:${runIdValue}:${accountId}`;
 }
 
+function holdingId(
+  connectionId: string,
+  providerAccountId: string,
+  securityId: string,
+) {
+  return `holding:plaid:${escapeIdentifierSegment(connectionId)}:${escapeIdentifierSegment(providerAccountId)}:${escapeIdentifierSegment(securityId)}`;
+}
+
+function holdingSnapshotId(runIdValue: string, holdingIdValue: string) {
+  return `holding_snapshot:${runIdValue}:${escapeIdentifierSegment(holdingIdValue)}`;
+}
+
 function runId(connectionId: string, now: Date) {
   const compactTimestamp = now
     .toISOString()
@@ -140,8 +186,83 @@ function normalizeCurrency(account: PlaidApiAccount) {
   );
 }
 
+function normalizeHoldingCurrency(
+  holding: PlaidApiHolding,
+  security?: PlaidApiSecurity,
+) {
+  return (
+    holding.iso_currency_code ??
+    holding.unofficial_currency_code ??
+    security?.iso_currency_code ??
+    security?.unofficial_currency_code ??
+    "USD"
+  );
+}
+
 function normalizeInstitutionName(connection: PlaidConnectionRow) {
   return connection.institutionName?.trim() || "Plaid";
+}
+
+function normalizeHoldingAssetClass(security?: PlaidApiSecurity) {
+  const securityType = security?.type?.trim().toLowerCase();
+
+  if (security?.is_cash_equivalent || securityType === "cash") {
+    return "cash" as const;
+  }
+
+  if (securityType === "cryptocurrency") {
+    return "crypto" as const;
+  }
+
+  if (securityType === "equity") {
+    return "equity" as const;
+  }
+
+  if (securityType === "fixed income") {
+    return "fixed_income" as const;
+  }
+
+  if (securityType === "etf" || securityType === "mutual fund") {
+    return "fund" as const;
+  }
+
+  return "other" as const;
+}
+
+function normalizeHoldingName(
+  holding: PlaidApiHolding,
+  security?: PlaidApiSecurity,
+) {
+  const securityName = security?.name?.trim();
+
+  if (securityName) {
+    return securityName;
+  }
+
+  const tickerSymbol = security?.ticker_symbol?.trim();
+
+  if (tickerSymbol) {
+    return tickerSymbol;
+  }
+
+  return holding.security_id;
+}
+
+function normalizeHoldingQuantity(value: number) {
+  return Number.isFinite(value) ? value.toString() : "0";
+}
+
+function parseCapturedAt(
+  value: null | string | undefined,
+  fallbackTimestamp: number,
+) {
+  if (!value) {
+    return fallbackTimestamp;
+  }
+
+  const parsedTimestamp = Date.parse(value);
+
+  return Number.isNaN(parsedTimestamp) ? fallbackTimestamp : parsedTimestamp;
 }
 
 function inferPlaidAccountClassification(account: PlaidApiAccount) {
@@ -349,6 +470,29 @@ export function createPlaidClient(
       return {
         accounts: response.accounts ?? [],
         item: response.item,
+      };
+    },
+
+    async getInvestmentsHoldings(args) {
+      const response = await requestPlaid<{
+        accounts: PlaidApiAccount[];
+        holdings: PlaidApiHolding[];
+        securities: PlaidApiSecurity[];
+      }>({
+        baseUrl,
+        body: {
+          access_token: args.accessToken,
+        },
+        clientId: config.clientId,
+        fetchImpl,
+        path: "/investments/holdings/get",
+        secret: config.secret,
+      });
+
+      return {
+        accounts: response.accounts ?? [],
+        holdings: response.holdings ?? [],
+        securities: response.securities ?? [],
       };
     },
   };
@@ -606,6 +750,114 @@ async function upsertPlaidAccount(args: {
   return 3;
 }
 
+async function upsertPlaidHolding(args: {
+  accountId: string;
+  connectionId: string;
+  database: D1Database;
+  holding: PlaidApiHolding;
+  now: Date;
+  runId: string;
+  security?: PlaidApiSecurity;
+}) {
+  const normalizedHoldingId = holdingId(
+    args.connectionId,
+    args.holding.account_id,
+    args.holding.security_id,
+  );
+  const timestamp = args.now.getTime();
+  const securityType = args.security?.type?.trim();
+  const securitySubtype = args.security?.subtype?.trim();
+  const symbol = args.security?.ticker_symbol?.trim() || null;
+
+  await args.database.batch([
+    args.database
+      .prepare(
+        `
+          insert into holdings (
+            id,
+            account_id,
+            holding_key,
+            symbol,
+            name,
+            security_id,
+            asset_class,
+            sub_asset_class,
+            currency,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          on conflict(id) do update set
+            symbol = excluded.symbol,
+            name = excluded.name,
+            security_id = excluded.security_id,
+            asset_class = excluded.asset_class,
+            sub_asset_class = excluded.sub_asset_class,
+            currency = excluded.currency,
+            updated_at = excluded.updated_at
+        `,
+      )
+      .bind(
+        normalizedHoldingId,
+        args.accountId,
+        `security:${args.holding.security_id}`,
+        symbol,
+        normalizeHoldingName(args.holding, args.security),
+        args.holding.security_id,
+        normalizeHoldingAssetClass(args.security),
+        [securityType, securitySubtype].filter(Boolean).join(":") || null,
+        normalizeHoldingCurrency(args.holding, args.security),
+        timestamp,
+        timestamp,
+      ),
+    args.database
+      .prepare(
+        `
+          insert into holding_snapshots (
+            id,
+            holding_id,
+            account_id,
+            source_sync_run_id,
+            captured_at,
+            as_of_date,
+            quantity,
+            price_minor,
+            market_value_minor,
+            cost_basis_minor
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          on conflict(id) do update set
+            captured_at = excluded.captured_at,
+            as_of_date = excluded.as_of_date,
+            quantity = excluded.quantity,
+            price_minor = excluded.price_minor,
+            market_value_minor = excluded.market_value_minor,
+            cost_basis_minor = excluded.cost_basis_minor
+        `,
+      )
+      .bind(
+        holdingSnapshotId(args.runId, normalizedHoldingId),
+        normalizedHoldingId,
+        args.accountId,
+        args.runId,
+        parseCapturedAt(
+          args.holding.institution_price_datetime,
+          args.now.getTime(),
+        ),
+        args.now.toISOString().slice(0, 10),
+        normalizeHoldingQuantity(args.holding.quantity),
+        toMinorUnits(args.holding.institution_price),
+        toMinorUnits(args.holding.institution_value),
+        args.holding.cost_basis === null ||
+          args.holding.cost_basis === undefined
+          ? null
+          : toMinorUnits(args.holding.cost_basis),
+      ),
+  ]);
+
+  return 2;
+}
+
 export async function syncPlaidConnection(
   args: PlaidSyncConnectionArgs,
 ): Promise<PlaidSyncConnectionResult> {
@@ -643,6 +895,21 @@ export async function syncPlaidConnection(
     const accountsResponse = await client.getAccounts({
       accessToken: connection.accessToken,
     });
+    const investmentAccounts = accountsResponse.accounts.filter(
+      (account) => account.type === "investment",
+    );
+    const holdingsResponse =
+      investmentAccounts.length > 0
+        ? await client.getInvestmentsHoldings({
+            accessToken: connection.accessToken,
+          })
+        : { accounts: [], holdings: [], securities: [] };
+    const securitiesById = new Map(
+      holdingsResponse.securities.map((security) => [
+        security.security_id,
+        security,
+      ]),
+    );
     let recordsChanged = 0;
 
     for (const account of accountsResponse.accounts) {
@@ -652,6 +919,18 @@ export async function syncPlaidConnection(
         database: args.database,
         now,
         runId: currentRunId,
+      });
+    }
+
+    for (const holding of holdingsResponse.holdings) {
+      recordsChanged += await upsertPlaidHolding({
+        accountId: canonicalAccountId(connection.id, holding.account_id),
+        connectionId: connection.id,
+        database: args.database,
+        holding,
+        now,
+        runId: currentRunId,
+        security: securitiesById.get(holding.security_id),
       });
     }
 

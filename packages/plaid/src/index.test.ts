@@ -153,6 +153,36 @@ describe("syncPlaidConnection", () => {
       exchangePublicToken: async () => {
         throw new Error("exchangePublicToken should not be called");
       },
+      getInvestmentsHoldings: async () => ({
+        accounts: [],
+        holdings: [
+          {
+            account_id: "account-1",
+            cost_basis: 900,
+            institution_price: holdingsRequestCount === 0 ? 100 : 105,
+            institution_price_as_of: "2026-03-27",
+            institution_price_datetime:
+              holdingsRequestCount === 0
+                ? "2026-03-27T23:10:00.000Z"
+                : "2026-03-27T23:20:00.000Z",
+            institution_value: holdingsRequestCount === 0 ? 1000 : 1050,
+            iso_currency_code: "USD",
+            quantity: 10,
+            security_id: "security-1",
+          },
+        ],
+        securities: [
+          {
+            is_cash_equivalent: false,
+            iso_currency_code: "USD",
+            name: "Vanguard Total Stock Market ETF",
+            security_id: "security-1",
+            subtype: "etf",
+            ticker_symbol: "VTI",
+            type: "etf",
+          },
+        ],
+      }),
       getAccounts: async () => ({
         accounts: [
           {
@@ -172,6 +202,13 @@ describe("syncPlaidConnection", () => {
           item_id: "item-demo-1",
         },
       }),
+    };
+    let holdingsRequestCount = 0;
+    const originalGetInvestmentsHoldings = client.getInvestmentsHoldings;
+    client.getInvestmentsHoldings = async () => {
+      const result = await originalGetInvestmentsHoldings();
+      holdingsRequestCount += 1;
+      return result;
     };
 
     const firstResult = await syncPlaidConnection({
@@ -205,6 +242,16 @@ describe("syncPlaidConnection", () => {
       },
     ).toEqual({ count: 2 });
     expect(
+      sqlite.query("select count(*) as count from holdings").get() as {
+        count: number;
+      },
+    ).toEqual({ count: 1 });
+    expect(
+      sqlite.query("select count(*) as count from holding_snapshots").get() as {
+        count: number;
+      },
+    ).toEqual({ count: 2 });
+    expect(
       sqlite
         .query(
           `
@@ -224,6 +271,50 @@ describe("syncPlaidConnection", () => {
       displayName: "Vanguard Brokerage Account",
       institutionName: "Vanguard",
       reportingGroup: "investments",
+    });
+    expect(
+      sqlite
+        .query(
+          `
+            select
+              asset_class as assetClass,
+              holding_key as holdingKey,
+              name,
+              security_id as securityId,
+              sub_asset_class as subAssetClass,
+              symbol
+            from holdings
+          `,
+        )
+        .get(),
+    ).toEqual({
+      assetClass: "fund",
+      holdingKey: "security:security-1",
+      name: "Vanguard Total Stock Market ETF",
+      securityId: "security-1",
+      subAssetClass: "etf:etf",
+      symbol: "VTI",
+    });
+    expect(
+      sqlite
+        .query(
+          `
+            select
+              market_value_minor as marketValueMinor,
+              price_minor as priceMinor,
+              quantity,
+              source_sync_run_id as sourceSyncRunId
+            from holding_snapshots
+            order by captured_at desc
+            limit 1
+          `,
+        )
+        .get(),
+    ).toEqual({
+      marketValueMinor: 105000,
+      priceMinor: 10500,
+      quantity: "10",
+      sourceSyncRunId: secondResult.runId,
     });
   });
 });
