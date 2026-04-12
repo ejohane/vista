@@ -294,6 +294,9 @@ export async function loader({ context }: Route.LoaderArgs) {
       })),
     hasSuccessfulSync: snapshot.hasSuccessfulSync,
     history: snapshot.history,
+    historyCoverageMode: snapshot.historyCoverageMode,
+    historyHasEstimatedPoints: snapshot.historyHasEstimatedPoints,
+    historyMode: snapshot.historyMode,
     householdName: snapshot.householdName,
     lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
     reportingGroups: snapshot.reportingGroups,
@@ -332,11 +335,21 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     changeSummary,
     connectionStates,
     history,
+    historyCoverageMode,
+    historyHasEstimatedPoints,
+    historyMode,
     householdName,
     lastSyncedAt,
     reportingGroups,
     totals,
   } = loaderData;
+  const historyDescription =
+    historyMode === "backfilled"
+      ? "Backfilled from investment transactions and daily prices"
+      : "Historical trajectory across syncs";
+  const showMixedCoverageNote =
+    historyMode === "backfilled" &&
+    historyCoverageMode === "mixed_snapshot_and_backfill";
 
   return (
     <DashboardShell activePath="/">
@@ -381,9 +394,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle>Net Worth</CardTitle>
-                  <CardDescription>
-                    Historical trajectory across syncs
-                  </CardDescription>
+                  <CardDescription>{historyDescription}</CardDescription>
                 </div>
                 <a
                   href="/portfolio"
@@ -398,6 +409,16 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               </div>
             </CardHeader>
             <CardContent>
+              {historyHasEstimatedPoints ? (
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Includes estimated pricing coverage
+                </p>
+              ) : null}
+              {showMixedCoverageNote ? (
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Cash and liabilities remain snapshot-backed
+                </p>
+              ) : null}
               <NetWorthChart history={history} />
             </CardContent>
           </Card>

@@ -1,12 +1,13 @@
 import { getDashboardSnapshot, getDb } from "@vista/db";
 
+import {
+  createAlphaVantagePriceClient,
+  refreshHistoricalNetWorthForRunIds,
+} from "./backfilled-net-worth";
 import { ingestDemoSyncBatch } from "./fixture-sync";
 import { syncConfiguredPlaidConnections } from "./plaid-sync";
 
-function readOptionalEnvString(
-  env: Env,
-  key: "PLAID_CLIENT_ID" | "PLAID_ENV" | "PLAID_SECRET",
-) {
+function readOptionalEnvString(env: Env, key: string) {
   const value = (env as Env & Record<string, unknown>)[key];
 
   return typeof value === "string" && value.trim() ? value : undefined;
@@ -86,6 +87,7 @@ export default {
   },
 
   async scheduled(event, env) {
+    const now = new Date();
     const hasConfiguredConnections = await hasConfiguredProviderConnection(env);
     const hasSeedData = await hasLocalSeedData(env);
     const plaidResults = await syncConfiguredPlaidConnections({
@@ -97,12 +99,32 @@ export default {
           | "production"
           | "sandbox"
           | undefined) ?? undefined,
+      now,
       secret: readOptionalEnvString(env, "PLAID_SECRET"),
     });
     const syncResults = [...plaidResults];
     const ingestResult =
       !hasConfiguredConnections && hasSeedData && syncResults.length === 0
         ? await ingestDemoSyncBatch(env.DB)
+        : null;
+    const alphaVantageApiKey = readOptionalEnvString(
+      env,
+      "ALPHA_VANTAGE_API_KEY",
+    );
+    const runIds = [
+      ...syncResults.map((result) => result.runId),
+      ...(ingestResult ? [ingestResult.runId] : []),
+    ];
+    const backfillResult =
+      runIds.length > 0
+        ? await refreshHistoricalNetWorthForRunIds({
+            database: env.DB,
+            now,
+            priceClient: alphaVantageApiKey
+              ? createAlphaVantagePriceClient({ apiKey: alphaVantageApiKey })
+              : undefined,
+            runIds,
+          })
         : null;
     const snapshot = await readSnapshot(env);
     const logPayload = ingestResult
@@ -127,6 +149,15 @@ export default {
           syncedConnections: syncResults.length,
           usedFixtureData: false,
         };
+
+    if (backfillResult && backfillResult.rebuiltHouseholdCount > 0) {
+      Object.assign(logPayload, {
+        backfilledHouseholds: backfillResult.rebuiltHouseholdCount,
+        importedPrices: backfillResult.importedPriceCount,
+        missingPrices: backfillResult.missingPriceCount,
+        rebuiltNetWorthFacts: backfillResult.netWorthFactCount,
+      });
+    }
 
     console.log(JSON.stringify(logPayload));
   },

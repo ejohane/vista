@@ -4,7 +4,9 @@ import type { VistaDb } from "./client";
 import {
   accounts,
   balanceSnapshots,
+  dailyNetWorthFacts,
   households,
+  type NetWorthCoverageMode,
   type ProviderConnectionStatus,
   type ProviderType,
   providerConnections,
@@ -142,6 +144,9 @@ export type HomepageSnapshot = {
   }>;
   hasSuccessfulSync: boolean;
   history: NetWorthHistoryPoint[];
+  historyCoverageMode: NetWorthCoverageMode | null;
+  historyHasEstimatedPoints: boolean;
+  historyMode: "backfilled" | "snapshot";
   householdName: string;
   lastSyncedAt: Date;
   reportingGroups: Array<{
@@ -737,10 +742,43 @@ export async function getDashboardSnapshot(
 export type NetWorthHistoryPoint = {
   cashMinor: number;
   completedAt: string;
+  coverageMode: NetWorthCoverageMode;
   investmentsMinor: number;
+  isEstimated: boolean;
   liabilitiesMinor: number;
   netWorthMinor: number;
 };
+
+async function getBackfilledNetWorthHistory(
+  db: DashboardDb,
+  householdId: string,
+  limit: number,
+): Promise<NetWorthHistoryPoint[]> {
+  const rows = await db
+    .select({
+      cashMinor: dailyNetWorthFacts.cashMinor,
+      coverageMode: dailyNetWorthFacts.coverageMode,
+      factDate: dailyNetWorthFacts.factDate,
+      investmentsMinor: dailyNetWorthFacts.investmentsMinor,
+      isEstimated: dailyNetWorthFacts.isEstimated,
+      liabilitiesMinor: dailyNetWorthFacts.liabilitiesMinor,
+      netWorthMinor: dailyNetWorthFacts.netWorthMinor,
+    })
+    .from(dailyNetWorthFacts)
+    .where(eq(dailyNetWorthFacts.householdId, householdId))
+    .orderBy(desc(dailyNetWorthFacts.factDate))
+    .limit(limit);
+
+  return [...rows].reverse().map((row) => ({
+    cashMinor: row.cashMinor,
+    completedAt: new Date(`${row.factDate}T00:00:00.000Z`).toISOString(),
+    coverageMode: row.coverageMode,
+    investmentsMinor: row.investmentsMinor,
+    isEstimated: row.isEstimated,
+    liabilitiesMinor: row.liabilitiesMinor,
+    netWorthMinor: row.netWorthMinor,
+  }));
+}
 
 export async function getNetWorthHistory(
   db: DashboardDb,
@@ -754,6 +792,16 @@ export async function getNetWorthHistory(
   }
 
   const resolvedHouseholdId = household.id;
+
+  const backfilledHistory = await getBackfilledNetWorthHistory(
+    db,
+    resolvedHouseholdId,
+    limit,
+  );
+
+  if (backfilledHistory.length >= 2) {
+    return backfilledHistory;
+  }
 
   const snapshotHistory = await loadHouseholdSnapshotHistory(
     db,
@@ -771,7 +819,9 @@ export async function getNetWorthHistory(
     return {
       cashMinor: totals.cashMinor,
       completedAt: point.completedAt.toISOString(),
+      coverageMode: "snapshot_only",
       investmentsMinor: totals.investmentsMinor,
+      isEstimated: false,
       liabilitiesMinor: reportingAccounts.reduce((result, account) => {
         return account.reportingGroup === "liabilities"
           ? result + account.balanceMinor
@@ -812,6 +862,17 @@ export async function getHomepageSnapshot(
     connectionStates,
     hasSuccessfulSync: dashboard.hasSuccessfulSync,
     history,
+    historyCoverageMode: history.length
+      ? history.some(
+          (point) => point.coverageMode === "mixed_snapshot_and_backfill",
+        )
+        ? "mixed_snapshot_and_backfill"
+        : (history[0]?.coverageMode ?? null)
+      : null,
+    historyHasEstimatedPoints: history.some((point) => point.isEstimated),
+    historyMode: history.some((point) => point.coverageMode !== "snapshot_only")
+      ? "backfilled"
+      : "snapshot",
     householdName: dashboard.householdName,
     lastSyncedAt: dashboard.lastSyncedAt,
     reportingGroups: buildHomepageReportingGroups(dashboard.accountTypeGroups),

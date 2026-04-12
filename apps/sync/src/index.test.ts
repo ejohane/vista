@@ -195,6 +195,23 @@ describe("sync worker", () => {
     const fetchMock = mock(async (input: RequestInfo | URL) => {
       const requestUrl = new URL(String(input));
 
+      if (requestUrl.pathname === "/transactions/sync") {
+        return new Response(
+          JSON.stringify({
+            accounts: [],
+            added: [],
+            has_more: false,
+            modified: [],
+            next_cursor: "cursor-1",
+            removed: [],
+          }),
+          {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+
       expect(requestUrl.pathname).toBe("/accounts/get");
 
       return new Response(
@@ -360,5 +377,226 @@ describe("sync worker", () => {
     const loggedPayload = String(firstConsoleCall?.[0] ?? "");
     expect(loggedPayload).toContain('"syncedConnections":0');
     expect(loggedPayload).toContain('"usedFixtureData":false');
+  });
+
+  test("scheduled backfills investment history for synced households when Alpha Vantage is configured", async () => {
+    const { d1, sqlite } = createEmptySyncDatabase();
+    const createdAt = new Date("2026-04-10T18:30:00.000Z").getTime();
+
+    sqlite
+      .query(
+        `
+          insert into households (id, name, last_synced_at, created_at)
+          values (?, ?, ?, ?)
+        `,
+      )
+      .run("household_demo", "Vista Household", createdAt, createdAt);
+    sqlite
+      .query(
+        `
+          insert into provider_connections (
+            id,
+            household_id,
+            provider,
+            status,
+            external_connection_id,
+            access_token,
+            institution_name,
+            plaid_item_id,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "conn_plaid_investments",
+        "household_demo",
+        "plaid",
+        "active",
+        "plaid-investments-demo",
+        "access-investments-demo",
+        "Vanguard",
+        "item-investments-demo",
+        createdAt,
+        createdAt,
+      );
+
+    const fetchMock = mock(async (input: RequestInfo | URL) => {
+      const requestUrl = new URL(String(input));
+
+      if (requestUrl.hostname === "www.alphavantage.co") {
+        return new Response(
+          JSON.stringify({
+            "Time Series (Daily)": {
+              "2026-04-10": {
+                "4. close": "276.11",
+                "5. adjusted close": "276.11",
+              },
+              "2026-04-09": {
+                "4. close": "275.10",
+                "5. adjusted close": "275.10",
+              },
+              "2026-04-08": {
+                "4. close": "274.32",
+                "5. adjusted close": "274.32",
+              },
+            },
+          }),
+          {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+
+      if (requestUrl.pathname === "/accounts/get") {
+        return new Response(
+          JSON.stringify({
+            accounts: [
+              {
+                account_id: "investment-123",
+                balances: {
+                  current: 2761.1,
+                  iso_currency_code: "USD",
+                },
+                name: "Brokerage",
+                official_name: "Vanguard Brokerage",
+                subtype: "brokerage",
+                type: "investment",
+              },
+            ],
+            item: {
+              institution_id: "ins_vanguard",
+              item_id: "item-investments-demo",
+            },
+          }),
+          {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+
+      if (requestUrl.pathname === "/investments/holdings/get") {
+        return new Response(
+          JSON.stringify({
+            accounts: [],
+            holdings: [
+              {
+                account_id: "investment-123",
+                cost_basis: 2500,
+                institution_price: 276.11,
+                institution_price_as_of: "2026-04-10",
+                institution_price_datetime: "2026-04-10T18:30:00.000Z",
+                institution_value: 2761.1,
+                iso_currency_code: "USD",
+                quantity: 10,
+                security_id: "security-vti",
+              },
+            ],
+            securities: [
+              {
+                is_cash_equivalent: false,
+                iso_currency_code: "USD",
+                name: "Vanguard Total Stock Market ETF",
+                security_id: "security-vti",
+                subtype: "etf",
+                ticker_symbol: "VTI",
+                type: "etf",
+              },
+            ],
+          }),
+          {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+
+      if (requestUrl.pathname === "/investments/transactions/get") {
+        return new Response(
+          JSON.stringify({
+            investment_transactions: [
+              {
+                account_id: "investment-123",
+                amount: 274.32,
+                date: "2026-04-08",
+                fees: null,
+                investment_transaction_id: "invtxn-1",
+                iso_currency_code: "USD",
+                name: "BUY Vanguard Total Stock Market ETF",
+                price: 274.32,
+                quantity: 1,
+                security_id: "security-vti",
+                subtype: "buy",
+                transaction_datetime: "2026-04-08T15:00:00.000Z",
+                type: "buy",
+              },
+            ],
+            total_investment_transactions: 1,
+          }),
+          {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+
+      if (requestUrl.pathname === "/transactions/sync") {
+        return new Response(
+          JSON.stringify({
+            accounts: [],
+            added: [],
+            has_more: false,
+            modified: [],
+            next_cursor: "cursor-investments-demo",
+            removed: [],
+          }),
+          {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+
+      throw new Error(`Unexpected fetch call: ${requestUrl.href}`);
+    });
+    const originalFetch = globalThis.fetch;
+    const consoleLog = mock(() => {});
+    const originalConsoleLog = console.log;
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    console.log = consoleLog;
+
+    try {
+      await worker.scheduled(
+        { cron: "0 13 * * *" } as ScheduledEvent,
+        {
+          ALPHA_VANTAGE_API_KEY: "alpha-demo",
+          DB: d1,
+          PLAID_CLIENT_ID: "client-demo",
+          PLAID_ENV: "sandbox",
+          PLAID_SECRET: "secret-demo",
+        } as unknown as Env,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      console.log = originalConsoleLog;
+    }
+
+    expect(
+      sqlite.query("select count(*) as count from daily_net_worth_facts").get(),
+    ).toEqual({ count: 5 });
+    expect(
+      sqlite.query("select count(*) as count from security_price_daily").get(),
+    ).toEqual({ count: 3 });
+    expect(consoleLog).toHaveBeenCalledTimes(1);
+    const firstConsoleCall = (
+      consoleLog.mock.calls as unknown as Array<unknown[]>
+    )[0];
+    const loggedPayload = String(firstConsoleCall?.[0] ?? "");
+    expect(loggedPayload).toContain('"backfilledHouseholds":1');
+    expect(loggedPayload).toContain('"rebuiltNetWorthFacts":5');
+    expect(loggedPayload).toContain('"importedPrices":3');
   });
 });
