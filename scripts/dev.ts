@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveDevPort } from "./dev-ports";
+import { readLocalHttpsRedirectUrl, rewriteUrlPort } from "./dev-url";
 import { loadLocalEnvFile, syncCloudflareDevVarsFiles } from "./local-env";
 
 const rootDir = path.resolve(
@@ -38,6 +39,8 @@ const stateWranglerBin = path.join(
 const defaultWebPort = 5173;
 const defaultSyncPort = 8788;
 const defaultStatePort = 8789;
+const defaultStateInspectorPort = 9233;
+const defaultSyncInspectorPort = 9234;
 const { filePath: localEnvFilePath, values: localEnv } =
   loadLocalEnvFile(rootDir);
 const commandEnv = {
@@ -50,25 +53,6 @@ type RunningProcess = {
   label: string;
   process: Bun.Subprocess<"ignore", "inherit", "inherit">;
 };
-
-function resolveLocalHttpsRedirectUrl(env: Record<string, string | undefined>) {
-  const redirectUrlValue = env.PLAID_REDIRECT_URI?.trim();
-
-  if (!redirectUrlValue) {
-    return null;
-  }
-
-  const redirectUrl = new URL(redirectUrlValue);
-
-  if (
-    redirectUrl.protocol !== "https:" ||
-    !redirectUrl.hostname.endsWith(".ts.net")
-  ) {
-    return null;
-  }
-
-  return redirectUrl;
-}
 
 function logStep(message: string) {
   console.log(`\n[dev] ${message}`);
@@ -183,6 +167,62 @@ async function main() {
     );
   }
 
+  await ensureLocalDbReady();
+
+  const webPort = await resolveDevPort({
+    defaultPort: defaultWebPort,
+    envValue: commandEnv.VISTA_WEB_PORT,
+    host,
+    label: "web",
+  });
+  const syncPort = await resolveDevPort({
+    defaultPort: defaultSyncPort,
+    envValue: commandEnv.VISTA_SYNC_PORT,
+    host,
+    label: "sync",
+  });
+  const statePort = await resolveDevPort({
+    defaultPort: defaultStatePort,
+    envValue: commandEnv.VISTA_STATE_PORT,
+    host,
+    label: "state",
+  });
+  const stateInspectorPort = await resolveDevPort({
+    defaultPort: defaultStateInspectorPort,
+    envValue: commandEnv.VISTA_STATE_INSPECTOR_PORT,
+    host,
+    label: "state inspector",
+  });
+  const syncInspectorPort = await resolveDevPort({
+    defaultPort: defaultSyncInspectorPort,
+    envValue: commandEnv.VISTA_SYNC_INSPECTOR_PORT,
+    host,
+    label: "sync inspector",
+  });
+
+  commandEnv.VISTA_WEB_PORT = String(webPort.port);
+  commandEnv.VISTA_SYNC_PORT = String(syncPort.port);
+  commandEnv.VISTA_STATE_PORT = String(statePort.port);
+  commandEnv.VISTA_STATE_INSPECTOR_PORT = String(stateInspectorPort.port);
+  commandEnv.VISTA_SYNC_INSPECTOR_PORT = String(syncInspectorPort.port);
+
+  let plaidRedirectUrl = readLocalHttpsRedirectUrl(commandEnv);
+  const configuredPlaidHttpsPort = plaidRedirectUrl?.port
+    ? Number(plaidRedirectUrl.port)
+    : null;
+  let plaidHttpsPort = null;
+
+  if (configuredPlaidHttpsPort) {
+    plaidHttpsPort = await resolveDevPort({
+      defaultPort: configuredPlaidHttpsPort,
+      host,
+      label: "plaid-https",
+    });
+
+    plaidRedirectUrl = rewriteUrlPort(plaidRedirectUrl, plaidHttpsPort.port);
+    commandEnv.PLAID_REDIRECT_URI = plaidRedirectUrl.toString();
+  }
+
   syncCloudflareDevVarsFiles({
     sourceFileLabel: path.relative(rootDir, localEnvFilePath) || ".env.local",
     targetDirs: [webAppDir, syncAppDir, stateAppDir],
@@ -191,27 +231,6 @@ async function main() {
     ),
   });
 
-  await ensureLocalDbReady();
-
-  const webPort = await resolveDevPort({
-    defaultPort: defaultWebPort,
-    envValue: process.env.VISTA_WEB_PORT,
-    host,
-    label: "web",
-  });
-  const syncPort = await resolveDevPort({
-    defaultPort: defaultSyncPort,
-    envValue: process.env.VISTA_SYNC_PORT,
-    host,
-    label: "sync",
-  });
-  const statePort = await resolveDevPort({
-    defaultPort: defaultStatePort,
-    envValue: process.env.VISTA_STATE_PORT,
-    host,
-    label: "state",
-  });
-  const plaidRedirectUrl = resolveLocalHttpsRedirectUrl(commandEnv);
   const householdStateBaseUrl = `http://${host}:${statePort.port}`;
 
   logStep("Starting development services");
@@ -228,6 +247,21 @@ async function main() {
   if (statePort.usedFallback) {
     console.log(
       `[dev] State port ${defaultStatePort} is busy, using ${statePort.port} instead.`,
+    );
+  }
+  if (stateInspectorPort.usedFallback) {
+    console.log(
+      `[dev] State inspector port ${defaultStateInspectorPort} is busy, using ${stateInspectorPort.port} instead.`,
+    );
+  }
+  if (syncInspectorPort.usedFallback) {
+    console.log(
+      `[dev] Sync inspector port ${defaultSyncInspectorPort} is busy, using ${syncInspectorPort.port} instead.`,
+    );
+  }
+  if (plaidHttpsPort?.usedFallback && plaidRedirectUrl) {
+    console.log(
+      `[dev] Plaid HTTPS port ${configuredPlaidHttpsPort} is busy, using ${plaidHttpsPort.port} instead.`,
     );
   }
   console.log(`[dev] Web:  http://${host}:${webPort.port}`);
@@ -247,6 +281,10 @@ async function main() {
         host,
         "--port",
         String(statePort.port),
+        "--inspector-ip",
+        host,
+        "--inspector-port",
+        String(stateInspectorPort.port),
         "--persist-to",
         "../web/.wrangler/state",
       ],
@@ -278,6 +316,10 @@ async function main() {
         host,
         "--port",
         String(syncPort.port),
+        "--inspector-ip",
+        host,
+        "--inspector-port",
+        String(syncInspectorPort.port),
         "--persist-to",
         "../web/.wrangler/state",
       ],

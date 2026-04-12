@@ -10,6 +10,18 @@ function hasStateServiceBinding(value: unknown): value is StateServiceBinding {
   return typeof value === "object" && value !== null && "fetch" in value;
 }
 
+function buildBaseUrlRequestUrl(input: RequestInfo | URL, baseUrl: string) {
+  const sourceUrl =
+    input instanceof Request
+      ? new URL(input.url)
+      : new URL(String(input), "https://household-state");
+
+  return new URL(
+    `${sourceUrl.pathname}${sourceUrl.search}${sourceUrl.hash}`,
+    baseUrl,
+  );
+}
+
 export function readHouseholdStateMode(env: Record<string, unknown>) {
   const configuredMode =
     typeof env.HOUSEHOLD_STATE_MODE === "string"
@@ -60,7 +72,12 @@ export function createHouseholdStateClientFromEnv(
 
   return createHouseholdStateClient({
     fetcher: (input, init) => {
-      const url = new URL(String(input), baseUrl);
+      const url = buildBaseUrlRequestUrl(input, baseUrl);
+
+      if (input instanceof Request) {
+        return fetch(new Request(url, input), init);
+      }
+
       return fetch(url, init);
     },
   });
