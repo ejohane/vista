@@ -1,3 +1,10 @@
+export {
+  decryptProviderToken,
+  encryptProviderToken,
+} from "./provider-credentials";
+
+import { decryptProviderToken } from "./provider-credentials";
+
 type PlaidEnvironment = "development" | "production" | "sandbox";
 
 type PlaidApiAccount = {
@@ -57,6 +64,8 @@ type PlaidApiResponse<T> = T & {
 
 type PlaidConnectionRow = {
   accessToken: null | string;
+  accessTokenEncrypted: null | string;
+  credentialKeyVersion: null | number;
   householdId: string;
   id: string;
   institutionName: null | string;
@@ -73,6 +82,7 @@ type PlaidSyncConnectionArgs = {
   database: D1Database;
   environment?: PlaidEnvironment;
   now?: Date;
+  providerTokenEncryptionKey?: string;
   secret?: string;
 };
 
@@ -89,6 +99,7 @@ type PlaidSyncConfiguredConnectionsArgs = {
   database: D1Database;
   environment?: PlaidEnvironment;
   now?: Date;
+  providerTokenEncryptionKey?: string;
   secret?: string;
 };
 
@@ -526,6 +537,8 @@ async function loadProviderConnection(
       `
         select
           access_token as accessToken,
+          access_token_encrypted as accessTokenEncrypted,
+          credential_key_version as credentialKeyVersion,
           household_id as householdId,
           id,
           institution_name as institutionName,
@@ -536,6 +549,26 @@ async function loadProviderConnection(
     )
     .bind(connectionId, "plaid")
     .first<PlaidConnectionRow>();
+}
+
+async function resolveConnectionAccessToken(args: {
+  connection: PlaidConnectionRow;
+  providerTokenEncryptionKey?: string;
+}) {
+  if (args.connection.accessTokenEncrypted) {
+    if (!args.providerTokenEncryptionKey) {
+      throw new Error(
+        `Plaid connection ${args.connection.id} requires PROVIDER_TOKEN_ENCRYPTION_KEY.`,
+      );
+    }
+
+    return decryptProviderToken({
+      encryptedToken: args.connection.accessTokenEncrypted,
+      secret: args.providerTokenEncryptionKey,
+    });
+  }
+
+  return args.connection.accessToken;
 }
 
 async function insertRunningSyncRun(args: {
@@ -867,7 +900,14 @@ export async function syncPlaidConnection(
     args.connectionId,
   );
 
-  if (!connection?.accessToken) {
+  const accessToken = connection
+    ? await resolveConnectionAccessToken({
+        connection,
+        providerTokenEncryptionKey: args.providerTokenEncryptionKey,
+      })
+    : null;
+
+  if (!connection || !accessToken) {
     throw new Error(
       `Plaid connection ${args.connectionId} is missing an access token.`,
     );
@@ -893,7 +933,7 @@ export async function syncPlaidConnection(
 
   try {
     const accountsResponse = await client.getAccounts({
-      accessToken: connection.accessToken,
+      accessToken,
     });
     const investmentAccounts = accountsResponse.accounts.filter(
       (account) => account.type === "investment",
@@ -901,7 +941,7 @@ export async function syncPlaidConnection(
     const holdingsResponse =
       investmentAccounts.length > 0
         ? await client.getInvestmentsHoldings({
-            accessToken: connection.accessToken,
+            accessToken,
           })
         : { accounts: [], holdings: [], securities: [] };
     const securitiesById = new Map(
@@ -978,7 +1018,7 @@ export async function syncConfiguredPlaidConnections(
         from provider_connections
         where provider = ?
           and status = ?
-          and access_token is not null
+          and (access_token_encrypted is not null or access_token is not null)
       `,
     )
     .bind("plaid", "active")
@@ -1004,6 +1044,7 @@ export async function syncConfiguredPlaidConnections(
           connectionId: connection.id,
           database: args.database,
           now: args.now,
+          providerTokenEncryptionKey: args.providerTokenEncryptionKey,
         }),
       );
     } catch (error) {

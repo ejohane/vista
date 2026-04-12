@@ -121,8 +121,11 @@ export const providerConnections = sqliteTable(
   "provider_connections",
   {
     accessToken: text("access_token"),
+    accessTokenEncrypted: text("access_token_encrypted"),
     accessSecret: text("access_secret"),
+    accessSecretEncrypted: text("access_secret_encrypted"),
     accessUrl: text("access_url"),
+    credentialKeyVersion: integer("credential_key_version").default(1),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     externalConnectionId: text("external_connection_id").notNull(),
     householdId: text("household_id")

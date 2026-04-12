@@ -8,6 +8,8 @@ import {
   exchangePlaidPublicToken,
 } from "./plaid-connect";
 
+const TEST_ENCRYPTION_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
+
 class FakeD1PreparedStatement {
   constructor(
     private readonly database: Database,
@@ -157,6 +159,7 @@ describe("exchangePlaidPublicToken", () => {
       institutionId: "ins_109508",
       institutionName: "Vanguard",
       now,
+      providerTokenEncryptionKey: TEST_ENCRYPTION_KEY,
       publicToken: "public-sandbox-123",
     });
 
@@ -173,6 +176,8 @@ describe("exchangePlaidPublicToken", () => {
               provider,
               external_connection_id as externalConnectionId,
               access_token as accessToken,
+              access_token_encrypted as accessTokenEncrypted,
+              credential_key_version as credentialKeyVersion,
               institution_id as institutionId,
               institution_name as institutionName,
               plaid_item_id as plaidItemId,
@@ -182,7 +187,9 @@ describe("exchangePlaidPublicToken", () => {
         )
         .get(),
     ).toEqual({
-      accessToken: "access-sandbox-123",
+      accessToken: null,
+      accessTokenEncrypted: expect.stringMatching(/^v1\.[^.]+\.[^.]+$/),
+      credentialKeyVersion: 1,
       externalConnectionId: "item-sandbox-123",
       institutionId: "ins_109508",
       institutionName: "Vanguard",

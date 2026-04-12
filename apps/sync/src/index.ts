@@ -5,7 +5,11 @@ import { syncConfiguredPlaidConnections } from "./plaid-sync";
 
 function readOptionalEnvString(
   env: Env,
-  key: "PLAID_CLIENT_ID" | "PLAID_ENV" | "PLAID_SECRET",
+  key:
+    | "PLAID_CLIENT_ID"
+    | "PLAID_ENV"
+    | "PLAID_SECRET"
+    | "PROVIDER_TOKEN_ENCRYPTION_KEY",
 ) {
   const value = (env as Env & Record<string, unknown>)[key];
 
@@ -39,7 +43,7 @@ async function hasConfiguredProviderConnection(env: Env) {
       from provider_connections
       where status = ?
         and provider = ?
-        and access_token is not null
+        and (access_token_encrypted is not null or access_token is not null)
       limit 1
     `,
   )
@@ -97,6 +101,10 @@ export default {
           | "production"
           | "sandbox"
           | undefined) ?? undefined,
+      providerTokenEncryptionKey: readOptionalEnvString(
+        env,
+        "PROVIDER_TOKEN_ENCRYPTION_KEY",
+      ),
       secret: readOptionalEnvString(env, "PLAID_SECRET"),
     });
     const syncResults = [...plaidResults];

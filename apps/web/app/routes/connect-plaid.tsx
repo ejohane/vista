@@ -106,7 +106,12 @@ declare global {
 
 function readOptionalEnvString(
   env: unknown,
-  key: "PLAID_CLIENT_ID" | "PLAID_ENV" | "PLAID_REDIRECT_URI" | "PLAID_SECRET",
+  key:
+    | "PLAID_CLIENT_ID"
+    | "PLAID_ENV"
+    | "PLAID_REDIRECT_URI"
+    | "PLAID_SECRET"
+    | "PROVIDER_TOKEN_ENCRYPTION_KEY",
 ) {
   const record = env as Record<string, unknown>;
   const value = record[key];
@@ -181,16 +186,20 @@ export function createConnectPlaidAction(deps?: {
     const env = readCloudflareEnv(context);
     const clientId = readOptionalEnvString(env, "PLAID_CLIENT_ID");
     const secret = readOptionalEnvString(env, "PLAID_SECRET");
+    const providerTokenEncryptionKey = readOptionalEnvString(
+      env,
+      "PROVIDER_TOKEN_ENCRYPTION_KEY",
+    );
     const environment = readOptionalEnvString(env, "PLAID_ENV") as
       | "development"
       | "production"
       | "sandbox"
       | undefined;
 
-    if (!clientId || !secret) {
+    if (!clientId || !secret || !providerTokenEncryptionKey) {
       return {
         message:
-          "Set PLAID_CLIENT_ID and PLAID_SECRET before starting Plaid onboarding.",
+          "Set PLAID_CLIENT_ID, PLAID_SECRET, and PROVIDER_TOKEN_ENCRYPTION_KEY before starting Plaid onboarding.",
         ok: false,
       } satisfies ActionData;
     }
@@ -217,6 +226,7 @@ export function createConnectPlaidAction(deps?: {
           typeof institutionId === "string" ? institutionId : undefined,
         institutionName:
           typeof institutionName === "string" ? institutionName : undefined,
+        providerTokenEncryptionKey,
         publicToken,
         secret,
       });
@@ -292,6 +302,10 @@ export function createConnectPlaidLoader(deps?: {
     const env = readCloudflareEnv(context);
     const clientId = readOptionalEnvString(env, "PLAID_CLIENT_ID");
     const secret = readOptionalEnvString(env, "PLAID_SECRET");
+    const providerTokenEncryptionKey = readOptionalEnvString(
+      env,
+      "PROVIDER_TOKEN_ENCRYPTION_KEY",
+    );
     const environment = readOptionalEnvString(env, "PLAID_ENV") as
       | "development"
       | "production"
@@ -302,10 +316,10 @@ export function createConnectPlaidLoader(deps?: {
       "PLAID_REDIRECT_URI",
     );
 
-    if (!clientId || !secret) {
+    if (!clientId || !secret || !providerTokenEncryptionKey) {
       return buildLoaderErrorData(
         "Plaid is not configured",
-        "Set PLAID_CLIENT_ID and PLAID_SECRET before launching Plaid Link.",
+        "Set PLAID_CLIENT_ID, PLAID_SECRET, and PROVIDER_TOKEN_ENCRYPTION_KEY before launching Plaid Link.",
       );
     }
 
@@ -315,6 +329,7 @@ export function createConnectPlaidLoader(deps?: {
         database: env.DB,
         environment,
         householdId: viewer.householdId,
+        providerTokenEncryptionKey,
         redirectUrl: buildPlaidRedirectUrl({
           configuredRedirectUrl,
           requestUrl: request.url,

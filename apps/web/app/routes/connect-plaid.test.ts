@@ -34,6 +34,8 @@ describe("connect plaid route loader", () => {
             PLAID_CLIENT_ID: "client-demo",
             PLAID_ENV: "sandbox",
             PLAID_SECRET: "secret-demo",
+            PROVIDER_TOKEN_ENCRYPTION_KEY:
+              "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
           },
         },
       },
@@ -83,6 +85,8 @@ describe("connect plaid route loader", () => {
             PLAID_CLIENT_ID: "client-demo",
             PLAID_ENV: "production",
             PLAID_SECRET: "secret-demo",
+            PROVIDER_TOKEN_ENCRYPTION_KEY:
+              "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
           },
         },
       },
@@ -130,7 +134,7 @@ describe("connect plaid route loader", () => {
     expect(result).toEqual({
       kind: "error",
       message:
-        "Set PLAID_CLIENT_ID and PLAID_SECRET before launching Plaid Link.",
+        "Set PLAID_CLIENT_ID, PLAID_SECRET, and PROVIDER_TOKEN_ENCRYPTION_KEY before launching Plaid Link.",
       title: "Plaid is not configured",
     });
   });
@@ -159,6 +163,8 @@ describe("connect plaid route loader", () => {
               PLAID_CLIENT_ID: "client-demo",
               PLAID_ENV: "sandbox",
               PLAID_SECRET: "secret-demo",
+              PROVIDER_TOKEN_ENCRYPTION_KEY:
+                "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
             },
           },
         },
@@ -210,6 +216,8 @@ describe("connect plaid route action", () => {
             PLAID_CLIENT_ID: "client-demo",
             PLAID_ENV: "sandbox",
             PLAID_SECRET: "secret-demo",
+            PROVIDER_TOKEN_ENCRYPTION_KEY:
+              "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
           },
         },
       },
@@ -275,7 +283,7 @@ describe("connect plaid route action", () => {
 
     expect(result).toEqual({
       message:
-        "Set PLAID_CLIENT_ID and PLAID_SECRET before starting Plaid onboarding.",
+        "Set PLAID_CLIENT_ID, PLAID_SECRET, and PROVIDER_TOKEN_ENCRYPTION_KEY before starting Plaid onboarding.",
       ok: false,
     });
   });
@@ -307,6 +315,8 @@ describe("connect plaid route action", () => {
               PLAID_CLIENT_ID: "client-demo",
               PLAID_ENV: "sandbox",
               PLAID_SECRET: "secret-demo",
+              PROVIDER_TOKEN_ENCRYPTION_KEY:
+                "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
             },
           },
         },

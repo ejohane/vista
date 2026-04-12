@@ -491,7 +491,7 @@ async function loadHomepageConnectionStates(
     db
       .select({
         accessToken: providerConnections.accessToken,
-        accessSecret: providerConnections.accessSecret,
+        accessTokenEncrypted: providerConnections.accessTokenEncrypted,
         accessUrl: providerConnections.accessUrl,
         provider: providerConnections.provider,
         status: providerConnections.status,
@@ -516,7 +516,8 @@ async function loadHomepageConnectionStates(
     );
     const configuredConnectionCount = providerConnectionsForProvider.filter(
       (connection) =>
-        connection.status === "active" && Boolean(connection.accessToken),
+        connection.status === "active" &&
+        Boolean(connection.accessTokenEncrypted ?? connection.accessToken),
     ).length;
     const status: HomepageSnapshot["connectionStates"][number]["status"] =
       configuredConnectionCount > 0

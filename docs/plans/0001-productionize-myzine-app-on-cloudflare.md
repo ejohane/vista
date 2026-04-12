@@ -31,12 +31,18 @@
   - Removed shared-household Plaid onboarding behavior so link token creation and public-token exchange now require the authenticated household ID.
   - Verified with `bun run lint`, `bun run typecheck`, and `bun run test`.
   - Manual browser verification was attempted via local dev at `http://127.0.0.1:5173/` and `http://localhost:5173/sign-in`, but blocked by a local Clerk handshake/JWKS mismatch from existing dev cookies rather than an app-code failure.
+- 2026-04-11: Completed the encrypted provider credential slice.
+  - Added encrypted provider credential columns to `provider_connections` with key-version metadata.
+  - Added a shared AES-GCM provider token utility in `packages/plaid`.
+  - Updated Plaid onboarding to store encrypted access tokens and null out new plaintext writes.
+  - Updated sync reads and homepage connection-state logic to prefer encrypted tokens while keeping legacy plaintext local rows readable during transition.
+  - Verified with `bun run lint`, `bun run typecheck`, and `bun run test`.
 
 ### Workstream status
 
 - Workstream 1: Not started.
 - Workstream 2: In progress.
-- Workstream 3: Not started.
+- Workstream 3: In progress.
 - Workstream 4: Not started.
 - Workstream 5: Not started.
 - Workstream 6: Not started.
