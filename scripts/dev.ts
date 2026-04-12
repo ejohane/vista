@@ -16,6 +16,7 @@ const wranglerBin = path.join(
 );
 const webAppDir = path.join(rootDir, "apps", "web");
 const syncAppDir = path.join(rootDir, "apps", "sync");
+const stateAppDir = path.join(rootDir, "apps", "state");
 const reactRouterBin = path.join(
   webAppDir,
   "node_modules",
@@ -28,8 +29,15 @@ const syncWranglerBin = path.join(
   ".bin",
   process.platform === "win32" ? "wrangler.cmd" : "wrangler",
 );
+const stateWranglerBin = path.join(
+  stateAppDir,
+  "node_modules",
+  ".bin",
+  process.platform === "win32" ? "wrangler.cmd" : "wrangler",
+);
 const defaultWebPort = 5173;
 const defaultSyncPort = 8788;
+const defaultStatePort = 8789;
 const { filePath: localEnvFilePath, values: localEnv } =
   loadLocalEnvFile(rootDir);
 const commandEnv = {
@@ -150,10 +158,14 @@ function spawnService(
   label: string,
   command: string[],
   cwd = rootDir,
+  envOverrides?: Record<string, string>,
 ): RunningProcess {
   const child = Bun.spawn(command, {
     cwd,
-    env: commandEnv,
+    env: {
+      ...commandEnv,
+      ...envOverrides,
+    },
     stderr: "inherit",
     stdin: "inherit",
     stdout: "inherit",
@@ -173,7 +185,7 @@ async function main() {
 
   syncCloudflareDevVarsFiles({
     sourceFileLabel: path.relative(rootDir, localEnvFilePath) || ".env.local",
-    targetDirs: [webAppDir, syncAppDir],
+    targetDirs: [webAppDir, syncAppDir, stateAppDir],
     values: Object.fromEntries(
       configuredLocalEnvKeys.map((key) => [key, commandEnv[key] ?? ""]),
     ),
@@ -193,7 +205,14 @@ async function main() {
     host,
     label: "sync",
   });
+  const statePort = await resolveDevPort({
+    defaultPort: defaultStatePort,
+    envValue: process.env.VISTA_STATE_PORT,
+    host,
+    label: "state",
+  });
   const plaidRedirectUrl = resolveLocalHttpsRedirectUrl(commandEnv);
+  const householdStateBaseUrl = `http://${host}:${statePort.port}`;
 
   logStep("Starting development services");
   if (webPort.usedFallback) {
@@ -206,13 +225,33 @@ async function main() {
       `[dev] Sync port ${defaultSyncPort} is busy, using ${syncPort.port} instead.`,
     );
   }
+  if (statePort.usedFallback) {
+    console.log(
+      `[dev] State port ${defaultStatePort} is busy, using ${statePort.port} instead.`,
+    );
+  }
   console.log(`[dev] Web:  http://${host}:${webPort.port}`);
   console.log(`[dev] Sync: http://${host}:${syncPort.port}`);
+  console.log(`[dev] State: ${householdStateBaseUrl}`);
   if (plaidRedirectUrl) {
     console.log(`[dev] Plaid HTTPS: ${plaidRedirectUrl.toString()}`);
   }
 
   const services = [
+    spawnService(
+      "state",
+      [
+        stateWranglerBin,
+        "dev",
+        "--ip",
+        host,
+        "--port",
+        String(statePort.port),
+        "--persist-to",
+        "../web/.wrangler/state",
+      ],
+      stateAppDir,
+    ),
     spawnService(
       "web",
       [
@@ -225,6 +264,9 @@ async function main() {
         "--strictPort",
       ],
       webAppDir,
+      {
+        HOUSEHOLD_STATE_BASE_URL: householdStateBaseUrl,
+      },
     ),
     spawnService(
       "sync",
@@ -240,6 +282,9 @@ async function main() {
         "../web/.wrangler/state",
       ],
       syncAppDir,
+      {
+        HOUSEHOLD_STATE_BASE_URL: householdStateBaseUrl,
+      },
     ),
   ];
 

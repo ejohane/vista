@@ -162,15 +162,25 @@ export type HomepageSnapshot = {
   };
 };
 
+function assertHouseholdId(
+  householdId: null | string | undefined,
+): asserts householdId is string {
+  if (!householdId?.trim()) {
+    throw new Error("Household id is required.");
+  }
+}
+
 async function resolveHousehold(
   db: DashboardDb,
-  householdId?: string,
+  householdId: string,
 ): Promise<ResolvedHousehold | null> {
-  return householdId
-    ? ((await db.query.households.findFirst({
-        where: eq(households.id, householdId),
-      })) ?? null)
-    : ((await db.query.households.findFirst()) ?? null);
+  assertHouseholdId(householdId);
+
+  return (
+    (await db.query.households.findFirst({
+      where: eq(households.id, householdId),
+    })) ?? null
+  );
 }
 
 function assertValidAccount(
@@ -670,7 +680,7 @@ function buildChangeSummary(
 
 export async function getDashboardSnapshot(
   db: DashboardDb,
-  householdId?: string,
+  householdId: string,
 ): Promise<DashboardSnapshot | null> {
   const household = await resolveHousehold(db, householdId);
 
@@ -744,7 +754,7 @@ export type NetWorthHistoryPoint = {
 
 export async function getNetWorthHistory(
   db: DashboardDb,
-  householdId?: string,
+  householdId: string,
   limit = 30,
 ): Promise<NetWorthHistoryPoint[]> {
   const household = await resolveHousehold(db, householdId);
@@ -784,7 +794,7 @@ export async function getNetWorthHistory(
 
 export async function getHomepageSnapshot(
   db: DashboardDb,
-  householdId?: string,
+  householdId: string,
 ): Promise<HomepageSnapshot | null> {
   const household = await resolveHousehold(db, householdId);
 

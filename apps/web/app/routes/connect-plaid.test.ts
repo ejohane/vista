@@ -9,7 +9,7 @@ describe("connect plaid route loader", () => {
   test("creates a link token when Plaid is configured", async () => {
     const createLinkTokenMock = mock(async () => {
       return {
-        householdId: "household_default",
+        householdId: "household_demo",
         householdWasCreated: true,
         linkToken: "link-sandbox-101",
       };
@@ -29,10 +29,13 @@ describe("connect plaid route loader", () => {
           },
         },
       },
-      request: new Request("http://localhost/connect/plaid"),
+      request: new Request(
+        "http://localhost/connect/plaid?householdId=household_demo",
+      ),
     } as never);
 
     expect(result).toEqual({
+      householdId: "household_demo",
       kind: "ready",
       linkToken: "link-sandbox-101",
     });
@@ -41,6 +44,7 @@ describe("connect plaid route loader", () => {
         clientId: "client-demo",
         database: {} as D1Database,
         environment: "sandbox",
+        householdId: "household_demo",
         secret: "secret-demo",
       }),
     );
@@ -49,7 +53,7 @@ describe("connect plaid route loader", () => {
   test("passes a redirect url for https Plaid OAuth flows", async () => {
     const createLinkTokenMock = mock(async () => {
       return {
-        householdId: "household_default",
+        householdId: "household_demo",
         householdWasCreated: true,
         linkToken: "link-sandbox-102",
       };
@@ -70,16 +74,18 @@ describe("connect plaid route loader", () => {
         },
       },
       request: new Request(
-        "https://vista.example/connect/plaid?oauth_state_id=demo",
+        "https://vista.example/connect/plaid?householdId=household_demo&oauth_state_id=demo",
       ),
     } as never);
 
     expect(result).toEqual({
+      householdId: "household_demo",
       kind: "ready",
       linkToken: "link-sandbox-102",
     });
     expect(createLinkTokenMock).toHaveBeenCalledWith(
       expect.objectContaining({
+        householdId: "household_demo",
         redirectUrl: "https://vista.example/connect/plaid",
       }),
     );
@@ -117,7 +123,7 @@ describe("connect plaid route action", () => {
     const exchangeMock = mock(async () => {
       return {
         connectionId: "conn:plaid:item-demo-101",
-        householdId: "household_default",
+        householdId: "household_demo",
         householdWasCreated: true,
       };
     });
@@ -133,6 +139,7 @@ describe("connect plaid route action", () => {
       syncPlaidConnection: syncMock,
     });
     const formData = new FormData();
+    formData.set("householdId", "household_demo");
     formData.set("publicToken", "public-sandbox-101");
     formData.set("institutionId", "ins_109508");
     formData.set("institutionName", "Vanguard");
@@ -148,19 +155,25 @@ describe("connect plaid route action", () => {
           },
         },
       },
-      request: new Request("http://localhost/connect/plaid", {
-        body: formData,
-        method: "POST",
-      }),
+      request: new Request(
+        "http://localhost/connect/plaid?householdId=household_demo",
+        {
+          body: formData,
+          method: "POST",
+        },
+      ),
     } as never)) as Response;
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe("/");
+    expect(response.headers.get("Location")).toBe(
+      "/?householdId=household_demo",
+    );
     expect(exchangeMock).toHaveBeenCalledWith(
       expect.objectContaining({
         clientId: "client-demo",
         database: {} as D1Database,
         environment: "sandbox",
+        householdId: "household_demo",
         institutionId: "ins_109508",
         institutionName: "Vanguard",
         publicToken: "public-sandbox-101",

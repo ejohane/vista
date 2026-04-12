@@ -180,7 +180,7 @@ describe("account review route", () => {
 
     expect(response.status).toBe(302);
     expect(response.headers.get("Location")).toBe(
-      "/accounts/review?updated=acct_checking",
+      "/accounts/review?householdId=household_demo&updated=acct_checking",
     );
     expect(
       sqlite
@@ -232,6 +232,7 @@ describe("account review route", () => {
           reportingGroup: "liabilities" as const,
         },
       ],
+      householdId: "household_demo",
       householdName: "Vista Household",
       kind: "ready" as const,
       lastSyncedAt: "2026-03-16T18:30:00.000Z",

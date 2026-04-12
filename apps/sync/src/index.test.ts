@@ -12,7 +12,7 @@ describe("sync worker", () => {
 
     const response = await worker.fetch(new Request("http://127.0.0.1:8788/"), {
       DB: d1,
-    } as Env);
+    } as unknown as Env);
     const body = (await response.json()) as {
       nextStep: string;
       status: string;
@@ -35,7 +35,7 @@ describe("sync worker", () => {
 
     const response = await worker.fetch(new Request("http://127.0.0.1:8788/"), {
       DB: d1,
-    } as Env);
+    } as unknown as Env);
     const body = (await response.json()) as {
       nextStep: string;
       status: string;
@@ -66,11 +66,11 @@ describe("sync worker", () => {
     try {
       await worker.scheduled(
         { cron: "0 13 * * *" } as ScheduledEvent,
-        { DB: d1 } as Env,
+        { DB: d1 } as unknown as Env,
       );
       await worker.scheduled(
         { cron: "0 13 * * *" } as ScheduledEvent,
-        { DB: d1 } as Env,
+        { DB: d1 } as unknown as Env,
       );
     } finally {
       console.log = originalConsoleLog;
@@ -121,7 +121,7 @@ describe("sync worker", () => {
     try {
       await worker.scheduled(
         { cron: "0 13 * * *" } as ScheduledEvent,
-        { DB: d1 } as Env,
+        { DB: d1 } as unknown as Env,
       );
     } finally {
       console.log = originalConsoleLog;
@@ -239,7 +239,7 @@ describe("sync worker", () => {
           PLAID_CLIENT_ID: "client-demo",
           PLAID_ENV: "sandbox",
           PLAID_SECRET: "secret-demo",
-        } as Env,
+        } as unknown as Env,
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -332,7 +332,7 @@ describe("sync worker", () => {
           PLAID_CLIENT_ID: "client-demo",
           PLAID_ENV: "sandbox",
           PLAID_SECRET: "secret-demo",
-        } as Env,
+        } as unknown as Env,
       );
     } finally {
       globalThis.fetch = originalFetch;

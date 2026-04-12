@@ -39,6 +39,7 @@ describe("Home route", () => {
             netWorthMinor: 45574310,
           },
         ],
+        householdId: "household_demo",
         householdName: "Vista Household",
         kind: "ready",
         lastSyncedAt: "2026-03-16T18:30:00.000Z",
@@ -97,7 +98,8 @@ describe("Home route", () => {
     expect(html).toContain("Connected");
     expect(html).toContain("/accounts/review");
     expect(html).toContain("/portfolio");
-    expect(html).toContain("/connect/plaid");
+    expect(html).toContain("/connect/plaid?householdId=household_demo");
+    expect(html).toContain("/portfolio?householdId=household_demo");
   });
 
   test("renders chart pending copy when history has fewer than two points", () => {
@@ -124,6 +126,7 @@ describe("Home route", () => {
             netWorthMinor: 46042850,
           },
         ],
+        householdId: "household_demo",
         householdName: "Vista Household",
         kind: "ready",
         lastSyncedAt: "2026-03-17T18:30:00.000Z",
@@ -160,6 +163,7 @@ describe("Home route", () => {
         ],
         hasSuccessfulSync: false,
         history: [],
+        householdId: "household_demo",
         householdName: "Vista Household",
         kind: "ready",
         lastSyncedAt: "2026-03-15T18:30:00.000Z",
