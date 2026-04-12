@@ -37,20 +37,33 @@
   - Updated Plaid onboarding to store encrypted access tokens and null out new plaintext writes.
   - Updated sync reads and homepage connection-state logic to prefer encrypted tokens while keeping legacy plaintext local rows readable during transition.
   - Verified with `bun run lint`, `bun run typecheck`, and `bun run test`.
+- 2026-04-11: Completed the user-facing household route hardening slice.
+  - Removed first-household fallback behavior from dashboard, homepage, portfolio, and account-curation query helpers.
+  - Updated the sync worker's local debug snapshot path to choose a household explicitly instead of depending on user-facing fallback behavior.
+  - Added regression coverage proving omitted household IDs now return `null` for user-facing snapshots.
+  - Verified with `bun test packages/db/src/queries.test.ts`, `bun test packages/db/src/portfolio.test.ts`, `bun run lint`, `bun run typecheck`, and `bun run test`.
+- 2026-04-12: Completed the production deploy and runbook slice.
+  - Added tokenized `prod` Wrangler environments for the web and sync workers, including observability, source maps, non-public sync deployment, and `myzine.app` custom-domain routing in config.
+  - Added a tested production config generator plus root deploy and remote-migration scripts so CI or a local operator can deploy without editing config files by hand.
+  - Added `deploy-prod.yml`, updated `.env.example`, and wrote local setup plus production rollout/rollback runbooks.
+  - Fixed React Router build issues caused by route imports of a server-only auth module, and validated both production deploy paths with manual `wrangler deploy --dry-run` checks using placeholder production D1 UUIDs.
+  - Verified with `bun run lint`, `bun run typecheck`, `bun run test`, and `bun run build`.
 
 ### Workstream status
 
-- Workstream 1: Not started.
+- Workstream 1: In progress.
 - Workstream 2: In progress.
 - Workstream 3: In progress.
-- Workstream 4: Not started.
-- Workstream 5: Not started.
-- Workstream 6: Not started.
-- Workstream 7: Not started.
+- Workstream 4: Completed.
+- Workstream 5: Completed.
+- Workstream 6: Completed.
+- Workstream 7: Completed.
 
 ### Verification notes
 
 - Automated verification currently passes for the identity and protected-route slices.
+- Automated verification now also passes for the user-facing household route-hardening slice, including explicit regression coverage for omitted household IDs.
+- Automated verification now also passes for the production deployment slice: the repo builds cleanly, the new production config generator is covered by tests, and both workers accept `wrangler deploy --dry-run` when given placeholder production D1 UUIDs.
 - Local browser verification of Clerk flows requires a clean Clerk dev session and matching local keys. The current machine/browser state produced Clerk handshake token verification failures before route rendering, so that step remains environment-blocked until local Clerk cookies or keys are reset.
 
 ## Non-goals
@@ -80,16 +93,13 @@
 
 ### Gaps that block a safe public launch
 
-- `apps/web/wrangler.jsonc` and `apps/sync/wrangler.jsonc` are still effectively local or dev-only and use placeholder D1 IDs.
-- There is no custom domain configuration for `myzine.app` yet.
-- There is no deployed production environment model for the two Workers.
-- The app does not yet have Clerk or another real authentication layer.
-- The database schema currently has `households`, but no `members` or `user_identities` tables.
-- User-facing queries still allow a fallback to the first household in the database when no household ID is provided.
-- `apps/web/app/lib/plaid-connect.ts` still uses a shared default household bootstrap (`DEFAULT_HOUSEHOLD_ID` / `DEFAULT_HOUSEHOLD_NAME`), which is unsafe for a public multi-user app.
-- Provider credentials are currently modeled as plaintext fields in D1 (`access_token`, `access_secret`) with no encryption layer.
-- `.env.example` is out of sync with the actual runtime needs and does not document Plaid or Clerk local development configuration.
-- There is no deployment workflow yet for production migrations and Worker deploys.
+- `apps/web/wrangler.jsonc` and `apps/sync/wrangler.jsonc` now include tokenized `prod` environments, but the real production D1 ids and Cloudflare-side resource setup still need to be supplied outside the repo.
+- Clerk authentication is now integrated into the web app, but production Clerk configuration and secret rollout are still pending.
+- The database schema now includes `members` and `user_identities` for app-owned household membership.
+- User-facing queries now require explicit household IDs instead of falling back to the first household in D1.
+- `apps/web/app/lib/plaid-connect.ts` now requires authenticated household resolution instead of a shared default household bootstrap.
+- New provider credentials now write through an encryption layer, while legacy plaintext local rows remain readable during transition.
+- The repository now contains production-ready Wrangler env blocks, deploy scripts, a deploy workflow, and updated local/production docs, but the live Cloudflare and GitHub secret values still need to be populated outside the repo.
 
 ## Production Blockers
 

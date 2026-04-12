@@ -26,7 +26,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import { requireViewerContext } from "@/lib/auth.server";
+import { requireViewerContext } from "@/lib/auth";
 import {
   formatCompactUsd,
   formatSignedUsd,

@@ -78,11 +78,13 @@ export async function getPortfolioSnapshot(
   db: PortfolioDb,
   householdId?: string,
 ): Promise<PortfolioSnapshot | null> {
-  const household = householdId
-    ? await db.query.households.findFirst({
-        where: eq(households.id, householdId),
-      })
-    : await db.query.households.findFirst();
+  if (!householdId) {
+    return null;
+  }
+
+  const household = await db.query.households.findFirst({
+    where: eq(households.id, householdId),
+  });
 
   if (!household) {
     return null;

@@ -4,6 +4,10 @@
   "compatibility_date": "2026-03-12",
   "compatibility_flags": ["nodejs_compat"],
   "main": "./workers/app.ts",
+  "observability": {
+    "enabled": true
+  },
+  "upload_source_maps": true,
   "d1_databases": [
     {
       "binding": "DB",
@@ -12,5 +16,48 @@
       "migrations_dir": "../../packages/db/migrations",
       "preview_database_id": "00000000-0000-0000-0000-000000000000"
     }
-  ]
+  ],
+  "env": {
+    "prod": {
+      "name": "vista-web-prod",
+      "main": "./build/server/index.js",
+      "assets": {
+        "directory": "./build/client"
+      },
+      "no_bundle": true,
+      "workers_dev": false,
+      "routes": [
+        {
+          "pattern": "myzine.app",
+          "custom_domain": true
+        }
+      ],
+      "observability": {
+        "enabled": true
+      },
+      "upload_source_maps": true,
+      "vars": {
+        "PLAID_ENV": "production",
+        "PLAID_REDIRECT_URI": "https://myzine.app/connect/plaid"
+      },
+      "secrets": {
+        "required": [
+          "CLERK_PUBLISHABLE_KEY",
+          "CLERK_SECRET_KEY",
+          "PLAID_CLIENT_ID",
+          "PLAID_SECRET",
+          "PROVIDER_TOKEN_ENCRYPTION_KEY"
+        ]
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "vista-prod",
+          "database_id": "__VISTA_PROD_D1_DATABASE_ID__",
+          "migrations_dir": "../../packages/db/migrations",
+          "preview_database_id": "__VISTA_PROD_PREVIEW_D1_DATABASE_ID__"
+        }
+      ]
+    }
+  }
 }

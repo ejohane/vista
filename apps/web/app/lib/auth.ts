@@ -43,18 +43,6 @@ export function buildSignInRedirectUrl(requestUrl: string) {
   return `/sign-in?redirect_url=${encodeURIComponent(buildRedirectParam(requestUrl))}`;
 }
 
-export function normalizeAppRedirectUrl(value: null | string | undefined) {
-  if (!value?.trim()) {
-    return "/";
-  }
-
-  if (!value.startsWith("/") || value.startsWith("//")) {
-    return "/";
-  }
-
-  return value;
-}
-
 export function createRequireViewerContext(deps?: {
   ensureClerkIdentityMembership?: typeof ensureClerkIdentityMembership;
   getAuth?: (args: ViewerArgs) => Promise<AuthResult>;

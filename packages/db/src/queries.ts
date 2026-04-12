@@ -166,11 +166,15 @@ async function resolveHousehold(
   db: DashboardDb,
   householdId?: string,
 ): Promise<ResolvedHousehold | null> {
-  return householdId
-    ? ((await db.query.households.findFirst({
-        where: eq(households.id, householdId),
-      })) ?? null)
-    : ((await db.query.households.findFirst()) ?? null);
+  if (!householdId) {
+    return null;
+  }
+
+  return (
+    (await db.query.households.findFirst({
+      where: eq(households.id, householdId),
+    })) ?? null
+  );
 }
 
 function assertValidAccount(

@@ -60,11 +60,13 @@ type UpdateAccountCurationArgs = {
 };
 
 async function resolveHousehold(db: AccountCurationDb, householdId?: string) {
-  return householdId
-    ? db.query.households.findFirst({
-        where: eq(households.id, householdId),
-      })
-    : db.query.households.findFirst();
+  if (!householdId) {
+    return null;
+  }
+
+  return db.query.households.findFirst({
+    where: eq(households.id, householdId),
+  });
 }
 
 async function resolveLatestSuccessfulRun(

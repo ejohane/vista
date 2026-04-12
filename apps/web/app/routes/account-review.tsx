@@ -18,7 +18,7 @@ import { DashboardShell } from "@/components/dashboard-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { requireViewerContext } from "@/lib/auth.server";
+import { requireViewerContext } from "@/lib/auth";
 import { formatCompactUsd, formatUpdatedAt, formatUsd } from "@/lib/format";
 import { readCloudflareEnv } from "@/lib/server-context";
 import { cn } from "@/lib/utils";

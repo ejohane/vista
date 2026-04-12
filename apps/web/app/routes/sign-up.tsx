@@ -3,7 +3,7 @@ import { getAuth } from "@clerk/react-router/server";
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect, useSearchParams } from "react-router";
 
-import { normalizeAppRedirectUrl } from "@/lib/auth.server";
+import { normalizeAppRedirectUrl } from "@/lib/redirects";
 
 export async function loader(args: LoaderFunctionArgs) {
   const auth = await getAuth(args);

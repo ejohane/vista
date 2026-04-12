@@ -320,7 +320,7 @@ describe("getPortfolioSnapshot", () => {
   test("builds a portfolio view from the latest holding snapshots", async () => {
     const db = createPortfolioTestDb();
 
-    const snapshot = await getPortfolioSnapshot(db);
+    const snapshot = await getPortfolioSnapshot(db, "household_demo");
 
     expect(snapshot).not.toBeNull();
     expect(snapshot?.householdName).toBe("Vista Household");
@@ -388,5 +388,11 @@ describe("getPortfolioSnapshot", () => {
         symbol: "BND",
       },
     ]);
+  });
+
+  test("returns null when no household id is provided", async () => {
+    const db = createPortfolioTestDb();
+
+    await expect(getPortfolioSnapshot(db)).resolves.toBeNull();
   });
 });

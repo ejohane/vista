@@ -18,7 +18,13 @@ function readOptionalEnvString(
 
 async function readSnapshot(env: Env) {
   const db = getDb(env.DB);
-  return getDashboardSnapshot(db);
+  const household = await db.query.households.findFirst({
+    columns: {
+      id: true,
+    },
+  });
+
+  return household ? getDashboardSnapshot(db, household.id) : null;
 }
 
 async function hasSuccessfulSync(env: Env) {

@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 
-import { createRequireViewerContext } from "./auth.server";
+import { createRequireViewerContext } from "./auth";
 
 describe("createRequireViewerContext", () => {
   test("redirects anonymous requests to sign-in with a return url", async () => {

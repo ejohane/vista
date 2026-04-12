@@ -239,7 +239,7 @@ describe("sync worker", () => {
           PLAID_CLIENT_ID: "client-demo",
           PLAID_ENV: "sandbox",
           PLAID_SECRET: "secret-demo",
-        } as Env,
+        } as unknown as Env,
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -332,7 +332,7 @@ describe("sync worker", () => {
           PLAID_CLIENT_ID: "client-demo",
           PLAID_ENV: "sandbox",
           PLAID_SECRET: "secret-demo",
-        } as Env,
+        } as unknown as Env,
       );
     } finally {
       globalThis.fetch = originalFetch;

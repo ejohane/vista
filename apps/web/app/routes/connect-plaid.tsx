@@ -23,7 +23,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { requireViewerContext } from "@/lib/auth.server";
+import { requireViewerContext } from "@/lib/auth";
 import {
   createPlaidLinkToken,
   exchangePlaidPublicToken,
