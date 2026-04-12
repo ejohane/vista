@@ -8,10 +8,11 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "bun run build:web && bun run build:sync",
+    "build": "bun run build:web && bun run build:sync && bun run build:state",
+    "build:state": "bun run --cwd apps/state build",
     "build:sync": "bun run --cwd apps/sync build",
     "build:web": "bun run --cwd apps/web build",
-    "cf-typegen": "bun run --cwd apps/web cf-typegen && bun run --cwd apps/sync cf-typegen",
+    "cf-typegen": "bun run --cwd apps/web cf-typegen && bun run --cwd apps/sync cf-typegen && bun run --cwd apps/state cf-typegen",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply vista-dev --local --config apps/web/wrangler.jsonc",
     "db:seed:local": "wrangler d1 execute vista-dev --local --config apps/web/wrangler.jsonc --file packages/db/seeds/dev.sql",
@@ -19,6 +20,7 @@
     "dev": "bun run scripts/dev.ts",
     "dev:empty": "bun run scripts/dev.ts --skip-seed",
     "dev:reset": "./scripts/dev-reset.sh",
+    "dev:state": "bun run scripts/dev-state.ts",
     "dev:worktree": "./scripts/dev.sh",
     "dev:sync": "bun run scripts/dev-sync.ts",
     "dev:web": "bun run scripts/dev-web.ts",
@@ -27,7 +29,7 @@
     "prepare": "bun run scripts/setup-hooks.ts",
     "precommit": "bun run lint && bun run typecheck && bun run test",
     "test": "bun test",
-    "typecheck": "bun run --cwd packages/db typecheck && bun run --cwd packages/plaid typecheck && bun run --cwd apps/sync typecheck && bun run --cwd apps/web typecheck"
+    "typecheck": "bun run --cwd packages/db typecheck && bun run --cwd packages/plaid typecheck && bun run --cwd packages/household-state typecheck && bun run --cwd apps/state typecheck && bun run --cwd apps/sync typecheck && bun run --cwd apps/web typecheck"
   },
   "devDependencies": {
     "@libsql/client": "^0.15.15",

@@ -84,6 +84,7 @@ describe("exchangePlaidPublicToken", () => {
     const createLinkTokenCalls: Array<Record<string, unknown>> = [];
 
     const result = await createPlaidLinkToken({
+      createHouseholdId: () => "household_generated",
       client: {
         createLinkToken: async (args) => {
           createLinkTokenCalls.push(args as Record<string, unknown>);
@@ -108,7 +109,7 @@ describe("exchangePlaidPublicToken", () => {
     });
 
     expect(result).toEqual({
-      householdId: "household_default",
+      householdId: "household_generated",
       householdWasCreated: true,
       linkToken: "link-sandbox-456",
     });
@@ -118,16 +119,62 @@ describe("exchangePlaidPublicToken", () => {
         products: ["investments"],
         requiredIfSupportedProducts: ["transactions", "liabilities"],
         redirectUri: undefined,
+        userId: "household_generated",
         transactionsDaysRequested: 730,
-        userId: "household_default",
       },
     ]);
+  });
+
+  test("throws when multiple households exist and no target household was provided", async () => {
+    const { d1, sqlite } = createWebTestDatabase();
+    const createdAt = new Date("2026-03-26T21:00:00.000Z").getTime();
+
+    sqlite
+      .query(
+        `
+          insert into households (id, name, last_synced_at, created_at)
+          values (?, ?, ?, ?), (?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "household_alpha",
+        "Alpha Household",
+        createdAt,
+        createdAt,
+        "household_beta",
+        "Beta Household",
+        createdAt,
+        createdAt,
+      );
+
+    await expect(
+      createPlaidLinkToken({
+        client: {
+          createLinkToken: async () => {
+            throw new Error("createLinkToken should not be called");
+          },
+          exchangePublicToken: async () => {
+            throw new Error("exchangePublicToken should not be called");
+          },
+          getAccounts: async () => {
+            throw new Error("getAccounts should not be called");
+          },
+          getInvestmentsHoldings: async () => {
+            throw new Error("getInvestmentsHoldings should not be called");
+          },
+        },
+        database: d1,
+      }),
+    ).rejects.toThrow(
+      "Multiple households are available. Pass householdId explicitly.",
+    );
   });
 
   test("exchanges the public token, creates a household, and stores the Plaid connection", async () => {
     const { d1, sqlite } = createWebTestDatabase();
 
     const result = await exchangePlaidPublicToken({
+      createHouseholdId: () => "household_generated",
       client: {
         createLinkToken: async () => {
           throw new Error("createLinkToken should not be called");
@@ -152,7 +199,7 @@ describe("exchangePlaidPublicToken", () => {
 
     expect(result).toEqual({
       connectionId: "conn:plaid:item-sandbox-123",
-      householdId: "household_default",
+      householdId: "household_generated",
       householdWasCreated: true,
     });
     expect(
@@ -180,5 +227,69 @@ describe("exchangePlaidPublicToken", () => {
       provider: "plaid",
       status: "active",
     });
+  });
+
+  test("can keep the access token out of shared D1 while forwarding the full connection to household state", async () => {
+    const { d1, sqlite } = createWebTestDatabase();
+    const persistedConnections: Array<Record<string, unknown>> = [];
+
+    const result = await exchangePlaidPublicToken({
+      createHouseholdId: () => "household_generated",
+      client: {
+        createLinkToken: async () => {
+          throw new Error("createLinkToken should not be called");
+        },
+        exchangePublicToken: async () => ({
+          accessToken: "access-sandbox-state-123",
+          itemId: "item-sandbox-state-123",
+        }),
+        getAccounts: async () => {
+          throw new Error("getAccounts should not be called");
+        },
+        getInvestmentsHoldings: async () => {
+          throw new Error("getInvestmentsHoldings should not be called");
+        },
+      },
+      database: d1,
+      institutionId: "ins_109508",
+      institutionName: "Vanguard",
+      now: new Date("2026-03-26T21:00:00.000Z"),
+      onConnectionPersisted: async (connection) => {
+        persistedConnections.push(connection as Record<string, unknown>);
+      },
+      persistAccessTokenInDatabase: false,
+      publicToken: "public-sandbox-123",
+    });
+
+    expect(result).toEqual({
+      connectionId: "conn:plaid:item-sandbox-state-123",
+      householdId: "household_generated",
+      householdWasCreated: true,
+    });
+    expect(
+      sqlite
+        .query(
+          `
+            select access_token as accessToken
+            from provider_connections
+          `,
+        )
+        .get(),
+    ).toEqual({
+      accessToken: null,
+    });
+    expect(persistedConnections).toEqual([
+      {
+        accessToken: "access-sandbox-state-123",
+        connectionId: "conn:plaid:item-sandbox-state-123",
+        createdAt: new Date("2026-03-26T21:00:00.000Z"),
+        externalConnectionId: "item-sandbox-state-123",
+        householdId: "household_generated",
+        institutionId: "ins_109508",
+        institutionName: "Vanguard",
+        plaidItemId: "item-sandbox-state-123",
+        updatedAt: new Date("2026-03-26T21:00:00.000Z"),
+      },
+    ]);
   });
 });

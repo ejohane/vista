@@ -1,6 +1,5 @@
 import { createPlaidClient, type PlaidClient } from "@vista/plaid";
 
-const DEFAULT_HOUSEHOLD_ID = "household_default";
 const DEFAULT_HOUSEHOLD_NAME = "Vista Household";
 const PLAID_REQUIRED_PRODUCTS = ["investments"] as const;
 const PLAID_REQUIRED_IF_SUPPORTED_PRODUCTS = [
@@ -18,8 +17,11 @@ type CreatePlaidLinkTokenArgs = {
   }) => PlaidClient;
   clientId?: string;
   countryCodes?: string[];
+  createHouseholdId?: () => string;
   database: D1Database;
   environment?: "development" | "production" | "sandbox";
+  householdId?: string;
+  householdName?: string;
   now?: Date;
   redirectUrl?: string;
   secret?: string;
@@ -33,17 +35,36 @@ type ExchangePlaidPublicTokenArgs = {
     secret: string;
   }) => PlaidClient;
   clientId?: string;
+  createHouseholdId?: () => string;
   database: D1Database;
   environment?: "development" | "production" | "sandbox";
+  householdId?: string;
+  householdName?: string;
   institutionId?: string;
   institutionName?: string;
   now?: Date;
+  onConnectionPersisted?: (args: {
+    accessToken: string;
+    connectionId: string;
+    createdAt: Date;
+    externalConnectionId: string;
+    householdId: string;
+    institutionId: null | string;
+    institutionName: string;
+    plaidItemId: string;
+    updatedAt: Date;
+  }) => Promise<void>;
+  persistAccessTokenInDatabase?: boolean;
   publicToken: string;
   secret?: string;
 };
 
 type HouseholdRow = {
   id: string;
+};
+
+type HouseholdCountRow = {
+  count: number;
 };
 
 export type CreatedPlaidLinkToken = {
@@ -58,24 +79,86 @@ export type ExchangedPlaidConnection = {
   householdWasCreated: boolean;
 };
 
-async function ensureHousehold(database: D1Database, now: Date) {
-  const existingHousehold = await database
-    .prepare(
-      `
-        select id
-        from households
-        order by created_at asc
-        limit 1
-      `,
-    )
-    .first<HouseholdRow>();
+function createGeneratedHouseholdId() {
+  return `household_${crypto.randomUUID()}`;
+}
 
-  if (existingHousehold) {
+async function ensureHousehold(
+  database: D1Database,
+  now: Date,
+  args: {
+    createHouseholdId?: () => string;
+    householdId?: string;
+    householdName?: string;
+  },
+) {
+  const requestedHouseholdId = args.householdId?.trim();
+
+  if (requestedHouseholdId) {
+    const existingHousehold = await database
+      .prepare(
+        `
+          select id
+          from households
+          where id = ?
+          limit 1
+        `,
+      )
+      .bind(requestedHouseholdId)
+      .first<HouseholdRow>();
+
+    if (!existingHousehold) {
+      throw new Error(`Household ${requestedHouseholdId} could not be found.`);
+    }
+
     return {
       householdId: existingHousehold.id,
       householdWasCreated: false,
     };
   }
+
+  const householdCount = await database
+    .prepare(
+      `
+        select count(*) as count
+        from households
+      `,
+    )
+    .first<HouseholdCountRow>();
+
+  const resolvedHouseholdCount = Number(householdCount?.count ?? 0);
+
+  if (resolvedHouseholdCount === 1) {
+    const existingHousehold = await database
+      .prepare(
+        `
+          select id
+          from households
+          order by created_at asc
+          limit 1
+        `,
+      )
+      .first<HouseholdRow>();
+
+    if (!existingHousehold) {
+      throw new Error("The household registry is out of sync.");
+    }
+
+    return {
+      householdId: existingHousehold.id,
+      householdWasCreated: false,
+    };
+  }
+
+  if (resolvedHouseholdCount > 1) {
+    throw new Error(
+      "Multiple households are available. Pass householdId explicitly.",
+    );
+  }
+
+  const householdId =
+    args.createHouseholdId?.() ?? createGeneratedHouseholdId();
+  const householdName = args.householdName?.trim() || DEFAULT_HOUSEHOLD_NAME;
 
   await database
     .prepare(
@@ -84,16 +167,11 @@ async function ensureHousehold(database: D1Database, now: Date) {
         values (?, ?, ?, ?)
       `,
     )
-    .bind(
-      DEFAULT_HOUSEHOLD_ID,
-      DEFAULT_HOUSEHOLD_NAME,
-      now.getTime(),
-      now.getTime(),
-    )
+    .bind(householdId, householdName, now.getTime(), now.getTime())
     .run();
 
   return {
-    householdId: DEFAULT_HOUSEHOLD_ID,
+    householdId,
     householdWasCreated: true,
   };
 }
@@ -134,6 +212,11 @@ export async function createPlaidLinkToken(
   const { householdId, householdWasCreated } = await ensureHousehold(
     args.database,
     now,
+    {
+      createHouseholdId: args.createHouseholdId,
+      householdId: args.householdId,
+      householdName: args.householdName,
+    },
   );
   const result = await client.createLinkToken({
     countryCodes: args.countryCodes,
@@ -170,6 +253,11 @@ export async function exchangePlaidPublicToken(
   const { householdId, householdWasCreated } = await ensureHousehold(
     args.database,
     now,
+    {
+      createHouseholdId: args.createHouseholdId,
+      householdId: args.householdId,
+      householdName: args.householdName,
+    },
   );
   const exchangeResult = await client.exchangePublicToken({
     publicToken,
@@ -177,6 +265,8 @@ export async function exchangePlaidPublicToken(
   const connectionId = `conn:plaid:${exchangeResult.itemId}`;
   const institutionId = args.institutionId?.trim() || null;
   const institutionName = args.institutionName?.trim() || "Plaid";
+  const persistAccessTokenInDatabase =
+    args.persistAccessTokenInDatabase ?? true;
 
   await args.database
     .prepare(
@@ -211,7 +301,7 @@ export async function exchangePlaidPublicToken(
       "plaid",
       "active",
       exchangeResult.itemId,
-      exchangeResult.accessToken,
+      persistAccessTokenInDatabase ? exchangeResult.accessToken : null,
       exchangeResult.itemId,
       institutionId,
       institutionName,
@@ -219,6 +309,18 @@ export async function exchangePlaidPublicToken(
       now.getTime(),
     )
     .run();
+
+  await args.onConnectionPersisted?.({
+    accessToken: exchangeResult.accessToken,
+    connectionId,
+    createdAt: now,
+    externalConnectionId: exchangeResult.itemId,
+    householdId,
+    institutionId,
+    institutionName,
+    plaidItemId: exchangeResult.itemId,
+    updatedAt: now,
+  });
 
   return {
     connectionId,

@@ -315,7 +315,7 @@ describe("getDashboardSnapshot", () => {
   test("falls back to legacy account balances when no successful sync runs exist yet", async () => {
     const { db } = createTestDb();
 
-    const snapshot = await getDashboardSnapshot(db);
+    const snapshot = await getDashboardSnapshot(db, "household_demo");
 
     expect(snapshot).not.toBeNull();
     expect(snapshot?.hasSuccessfulSync).toBe(false);
@@ -359,7 +359,7 @@ describe("getDashboardSnapshot", () => {
       startedAt: new Date("2026-03-16T18:25:00.000Z"),
     });
 
-    const snapshot = await getDashboardSnapshot(db);
+    const snapshot = await getDashboardSnapshot(db, "household_demo");
 
     expect(snapshot).not.toBeNull();
     expect(snapshot?.hasSuccessfulSync).toBe(true);
@@ -427,7 +427,7 @@ describe("getDashboardSnapshot", () => {
       startedAt: new Date("2026-03-16T18:25:00.000Z"),
     });
 
-    const snapshot = await getDashboardSnapshot(db);
+    const snapshot = await getDashboardSnapshot(db, "household_demo");
 
     expect(snapshot?.totals).toEqual({
       cashMinor: 4812100,
@@ -483,7 +483,7 @@ describe("getDashboardSnapshot", () => {
       startedAt: new Date("2026-03-16T18:25:00.000Z"),
     });
 
-    const snapshot = await getDashboardSnapshot(db);
+    const snapshot = await getDashboardSnapshot(db, "household_demo");
 
     expect(snapshot?.hasSuccessfulSync).toBe(true);
     expect(snapshot?.changeSummary).toEqual({
@@ -568,7 +568,7 @@ describe("getDashboardSnapshot", () => {
       startedAt: new Date("2026-03-16T18:25:00.000Z"),
     });
 
-    const snapshot = await getDashboardSnapshot(db);
+    const snapshot = await getDashboardSnapshot(db, "household_demo");
 
     expect(snapshot?.hasSuccessfulSync).toBe(true);
     expect(snapshot?.changeSummary).toBeNull();
@@ -630,7 +630,7 @@ describe("getDashboardSnapshot", () => {
       startedAt: new Date("2026-03-16T18:25:00.000Z"),
     });
 
-    const snapshot = await getDashboardSnapshot(db);
+    const snapshot = await getDashboardSnapshot(db, "household_demo");
 
     expect(snapshot?.hasSuccessfulSync).toBe(true);
     expect(snapshot?.totals).toEqual({
@@ -739,7 +739,7 @@ describe("getDashboardSnapshot", () => {
       startedAt: new Date("2026-03-16T18:25:00.000Z"),
     });
 
-    const snapshot = await getDashboardSnapshot(db);
+    const snapshot = await getDashboardSnapshot(db, "household_demo");
 
     expect(snapshot?.totals).toEqual({
       cashMinor: 1284500,
@@ -818,6 +818,14 @@ describe("getDashboardSnapshot", () => {
 });
 
 describe("getHomepageSnapshot", () => {
+  test("throws when the household id is omitted", async () => {
+    const { db } = createTestDb();
+
+    await expect(getHomepageSnapshot(db, undefined as never)).rejects.toThrow(
+      "Household id is required.",
+    );
+  });
+
   test("returns reporting groups, history, and provider connection state for the homepage", async () => {
     const { db, sqlite } = createTestDb();
 
@@ -855,7 +863,7 @@ describe("getHomepageSnapshot", () => {
       startedAt: new Date("2026-03-16T18:25:00.000Z"),
     });
 
-    const snapshot = await getHomepageSnapshot(db);
+    const snapshot = await getHomepageSnapshot(db, "household_demo");
 
     expect(snapshot).not.toBeNull();
     expect(snapshot?.reportingGroups).toEqual([
@@ -922,7 +930,7 @@ describe("getHomepageSnapshot", () => {
       status: "error",
     });
 
-    const snapshot = await getHomepageSnapshot(db);
+    const snapshot = await getHomepageSnapshot(db, "household_demo");
 
     expect(snapshot?.hasSuccessfulSync).toBe(false);
     expect(snapshot?.connectionStates).toEqual([
@@ -992,7 +1000,7 @@ describe("getHomepageSnapshot", () => {
       startedAt: new Date("2026-03-16T18:25:00.000Z"),
     });
 
-    const snapshot = await getHomepageSnapshot(db);
+    const snapshot = await getHomepageSnapshot(db, "household_demo");
 
     expect(snapshot?.totals).toEqual({
       cashMinor: 4812100,
@@ -1109,7 +1117,7 @@ describe("getHomepageSnapshot", () => {
       secondCompletedAt.getTime(),
     );
 
-    const snapshot = await getHomepageSnapshot(db);
+    const snapshot = await getHomepageSnapshot(db, "household_demo");
 
     expect(snapshot?.historyMode).toBe("backfilled");
     expect(snapshot?.historyCoverageMode).toBe("investments_backfilled");

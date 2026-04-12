@@ -6,10 +6,13 @@ import {
 } from "@phosphor-icons/react";
 import {
   type AccountCurationSnapshot,
-  getAccountCurationSnapshot,
+  createD1HouseholdAccess,
+  createD1HouseholdService,
   getDb,
+  type HouseholdAccess,
+  type HouseholdService,
   ownershipTypes,
-  updateAccountCuration,
+  resolveHouseholdSelection,
 } from "@vista/db";
 import { useDeferredValue, useState } from "react";
 import { redirect, useFetcher } from "react-router";
@@ -19,8 +22,24 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatCompactUsd, formatUpdatedAt, formatUsd } from "@/lib/format";
+import {
+  buildHouseholdPath,
+  readRequestedHouseholdId,
+} from "@/lib/household-routing";
+import { createWebRuntimeHouseholdService } from "@/lib/runtime-household-service";
 import { cn } from "@/lib/utils";
 import type { Route } from "./+types/account-review";
+
+type AccountReviewRouteDeps = {
+  createHouseholdAccess?: (db: ReturnType<typeof getDb>) => HouseholdAccess;
+  createHouseholdService?: (
+    db: ReturnType<typeof getDb>,
+  ) => Pick<
+    HouseholdService,
+    "getAccountCurationSnapshot" | "updateAccountCuration"
+  >;
+  resolveHouseholdSelection?: typeof resolveHouseholdSelection;
+};
 
 /* ------------------------------------------------------------------ */
 /*  Constants & types                                                  */
@@ -433,80 +452,153 @@ export function meta(_: Route.MetaArgs) {
   ];
 }
 
-export async function loader({ context, request }: Route.LoaderArgs) {
-  const snapshot = await getAccountCurationSnapshot(
-    getDb(context.cloudflare.env.DB),
-  );
-  const updatedAccountId = new URL(request.url).searchParams.get("updated");
+export function createAccountReviewLoader(deps: AccountReviewRouteDeps = {}) {
+  const createHouseholdAccess =
+    deps.createHouseholdAccess ?? createD1HouseholdAccess;
+  const createHouseholdService =
+    deps.createHouseholdService ?? createD1HouseholdService;
+  const resolveSelectedHousehold =
+    deps.resolveHouseholdSelection ?? resolveHouseholdSelection;
 
-  if (!snapshot) {
-    return { kind: "empty" as const, updatedAccountId };
-  }
+  return async function loader({ context, request }: Route.LoaderArgs) {
+    const updatedAccountId = new URL(request.url).searchParams.get("updated");
+    const db = getDb(context.cloudflare.env.DB);
 
-  return {
-    accounts: snapshot.accounts,
-    householdName: snapshot.householdName,
-    kind: "ready" as const,
-    lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
-    summary: snapshot.summary,
-    updatedAccountId,
+    try {
+      const household = await resolveSelectedHousehold(
+        createHouseholdAccess(db),
+        readRequestedHouseholdId(request),
+      );
+
+      if (!household) {
+        return { householdId: null, kind: "empty" as const, updatedAccountId };
+      }
+
+      const snapshot = await createHouseholdService(
+        db,
+      ).getAccountCurationSnapshot(household.id);
+
+      if (!snapshot) {
+        return {
+          householdId: household.id,
+          kind: "empty" as const,
+          updatedAccountId,
+        };
+      }
+
+      return {
+        accounts: snapshot.accounts,
+        householdId: household.id,
+        householdName: snapshot.householdName,
+        kind: "ready" as const,
+        lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
+        summary: snapshot.summary,
+        updatedAccountId,
+      };
+    } catch (error) {
+      return {
+        kind: "error" as const,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Household selection could not be resolved.",
+        title: "Household selection required",
+      };
+    }
   };
 }
 
-export async function action({ context, request }: Route.ActionArgs) {
-  const formData = await request.formData();
-  const accountId = formData.get("accountId");
-  const displayName = formData.get("displayName");
-  const ownershipType = formData.get("ownershipType");
-  const intent = formData.get("intent");
+export async function loader(args: Route.LoaderArgs) {
+  return createAccountReviewLoader({
+    createHouseholdService: () =>
+      createWebRuntimeHouseholdService(args.context.cloudflare.env),
+  })(args);
+}
 
-  if (typeof accountId !== "string" || !accountId.trim()) {
-    return {
-      message: "Choose an account before saving curation changes.",
-      ok: false,
-    } satisfies ActionData;
-  }
+export function createAccountReviewAction(deps: AccountReviewRouteDeps = {}) {
+  const createHouseholdAccess =
+    deps.createHouseholdAccess ?? createD1HouseholdAccess;
+  const createHouseholdService =
+    deps.createHouseholdService ?? createD1HouseholdService;
+  const resolveSelectedHousehold =
+    deps.resolveHouseholdSelection ?? resolveHouseholdSelection;
 
-  if (
-    typeof ownershipType !== "string" ||
-    !ownershipTypes.includes(ownershipType as OwnershipOption)
-  ) {
-    return {
-      accountId,
-      message: "Select a supported ownership label before saving.",
-      ok: false,
-    } satisfies ActionData;
-  }
+  return async function action({ context, request }: Route.ActionArgs) {
+    const formData = await request.formData();
+    const accountId = formData.get("accountId");
+    const displayName = formData.get("displayName");
+    const ownershipType = formData.get("ownershipType");
+    const intent = formData.get("intent");
 
-  const resolvedOwnershipType = ownershipType as OwnershipOption;
-
-  try {
-    await updateAccountCuration(getDb(context.cloudflare.env.DB), {
-      accountId,
-      displayName: typeof displayName === "string" ? displayName : null,
-      includeInHouseholdReporting:
-        formData.get("includeInHouseholdReporting") === "on",
-      isHidden: formData.get("isHidden") === "on",
-      ownershipType: resolvedOwnershipType,
-    });
-
-    if (intent === "inline") {
-      return { accountId, ok: true as const };
+    if (typeof accountId !== "string" || !accountId.trim()) {
+      return {
+        message: "Choose an account before saving curation changes.",
+        ok: false,
+      } satisfies ActionData;
     }
 
-    return redirect(
-      `/accounts/review?updated=${encodeURIComponent(accountId)}`,
-    );
-  } catch (error) {
-    return {
-      accountId,
-      message:
-        error instanceof Error
-          ? error.message
-          : "Account curation failed unexpectedly.",
-      ok: false,
-    } satisfies ActionData;
-  }
+    if (
+      typeof ownershipType !== "string" ||
+      !ownershipTypes.includes(ownershipType as OwnershipOption)
+    ) {
+      return {
+        accountId,
+        message: "Select a supported ownership label before saving.",
+        ok: false,
+      } satisfies ActionData;
+    }
+
+    const db = getDb(context.cloudflare.env.DB);
+
+    try {
+      const household = await resolveSelectedHousehold(
+        createHouseholdAccess(db),
+        readRequestedHouseholdId(request),
+      );
+
+      if (!household) {
+        throw new Error("No household is available for account curation.");
+      }
+
+      await createHouseholdService(db).updateAccountCuration({
+        accountId,
+        displayName: typeof displayName === "string" ? displayName : null,
+        householdId: household.id,
+        includeInHouseholdReporting:
+          formData.get("includeInHouseholdReporting") === "on",
+        isHidden: formData.get("isHidden") === "on",
+        ownershipType: ownershipType as OwnershipOption,
+      });
+
+      if (intent === "inline") {
+        return { accountId, ok: true as const };
+      }
+
+      const redirectUrl = new URL(
+        buildHouseholdPath("/accounts/review", household.id),
+        "http://localhost",
+      );
+      redirectUrl.searchParams.set("updated", accountId);
+
+      return redirect(`${redirectUrl.pathname}${redirectUrl.search}`);
+    } catch (error) {
+      return {
+        accountId,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Account curation failed unexpectedly.",
+        ok: false,
+      } satisfies ActionData;
+    }
+  };
+}
+
+export async function action(args: Route.ActionArgs) {
+  return createAccountReviewAction({
+    createHouseholdService: () =>
+      createWebRuntimeHouseholdService(args.context.cloudflare.env),
+  })(args);
 }
 
 /* ------------------------------------------------------------------ */
@@ -523,6 +615,23 @@ export function AccountReviewScreen({
   const [sortOption, setSortOption] = useState<SortOption>("default");
   const deferredSearch = useDeferredValue(searchValue);
   const normalizedSearch = deferredSearch.trim().toLowerCase();
+
+  if (loaderData.kind === "error") {
+    return (
+      <DashboardShell activePath="/accounts/review">
+        <div className="flex min-h-[70vh] items-center justify-center p-6">
+          <Card className="w-full max-w-md">
+            <CardContent className="space-y-3 p-6 text-center">
+              <p className="text-lg font-medium">{loaderData.title}</p>
+              <p className="text-sm text-muted-foreground">
+                {loaderData.message}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardShell>
+    );
+  }
 
   if (loaderData.kind !== "ready") {
     return (
@@ -541,10 +650,27 @@ export function AccountReviewScreen({
                 Connect a provider or seed local data first.
               </p>
               <div className="mt-6 flex gap-3">
-                <a href="/connect/plaid" className={buttonVariants()}>
+                <a
+                  href={
+                    loaderData.householdId
+                      ? buildHouseholdPath(
+                          "/connect/plaid",
+                          loaderData.householdId,
+                        )
+                      : "/connect/plaid"
+                  }
+                  className={buttonVariants()}
+                >
                   Connect Plaid
                 </a>
-                <a href="/" className={buttonVariants({ variant: "outline" })}>
+                <a
+                  href={
+                    loaderData.householdId
+                      ? buildHouseholdPath("/", loaderData.householdId)
+                      : "/"
+                  }
+                  className={buttonVariants({ variant: "outline" })}
+                >
                   Back to overview
                 </a>
               </div>

@@ -49,22 +49,30 @@ export type AccountCurationSnapshot = {
   };
 };
 
-type UpdateAccountCurationArgs = {
+export type UpdateAccountCurationArgs = {
   accountId: string;
   displayName: null | string;
-  householdId?: string;
+  householdId: string;
   includeInHouseholdReporting: boolean;
   isHidden: boolean;
   now?: Date;
   ownershipType: OwnershipType;
 };
 
-async function resolveHousehold(db: AccountCurationDb, householdId?: string) {
-  return householdId
-    ? db.query.households.findFirst({
-        where: eq(households.id, householdId),
-      })
-    : db.query.households.findFirst();
+function assertHouseholdId(
+  householdId: null | string | undefined,
+): asserts householdId is string {
+  if (!householdId?.trim()) {
+    throw new Error("Household id is required.");
+  }
+}
+
+async function resolveHousehold(db: AccountCurationDb, householdId: string) {
+  assertHouseholdId(householdId);
+
+  return db.query.households.findFirst({
+    where: eq(households.id, householdId),
+  });
 }
 
 async function resolveLatestSuccessfulRun(
@@ -118,7 +126,7 @@ function sortAccounts(snapshot: AccountCurationSnapshot["accounts"]) {
 
 export async function getAccountCurationSnapshot(
   db: AccountCurationDb,
-  householdId?: string,
+  householdId: string,
 ): Promise<AccountCurationSnapshot | null> {
   const household = await resolveHousehold(db, householdId);
 
