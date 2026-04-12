@@ -18,7 +18,9 @@ import { DashboardShell } from "@/components/dashboard-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { requireViewerContext } from "@/lib/auth.server";
 import { formatCompactUsd, formatUpdatedAt, formatUsd } from "@/lib/format";
+import { readCloudflareEnv } from "@/lib/server-context";
 import { cn } from "@/lib/utils";
 import type { Route } from "./+types/account-review";
 
@@ -433,81 +435,108 @@ export function meta(_: Route.MetaArgs) {
   ];
 }
 
-export async function loader({ context, request }: Route.LoaderArgs) {
-  const snapshot = await getAccountCurationSnapshot(
-    getDb(context.cloudflare.env.DB),
-  );
-  const updatedAccountId = new URL(request.url).searchParams.get("updated");
+export function createAccountReviewLoader(deps?: {
+  getAccountCurationSnapshot?: typeof getAccountCurationSnapshot;
+  requireViewerContext?: typeof requireViewerContext;
+}) {
+  const loadAccountCurationSnapshot =
+    deps?.getAccountCurationSnapshot ?? getAccountCurationSnapshot;
+  const requireViewer = deps?.requireViewerContext ?? requireViewerContext;
 
-  if (!snapshot) {
-    return { kind: "empty" as const, updatedAccountId };
-  }
+  return async function loader({ context, request }: Route.LoaderArgs) {
+    const viewer = await requireViewer({ context, request });
+    const env = readCloudflareEnv(context);
+    const snapshot = await loadAccountCurationSnapshot(
+      getDb(env.DB),
+      viewer.householdId,
+    );
+    const updatedAccountId = new URL(request.url).searchParams.get("updated");
 
-  return {
-    accounts: snapshot.accounts,
-    householdName: snapshot.householdName,
-    kind: "ready" as const,
-    lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
-    summary: snapshot.summary,
-    updatedAccountId,
+    if (!snapshot) {
+      return { kind: "empty" as const, updatedAccountId };
+    }
+
+    return {
+      accounts: snapshot.accounts,
+      householdName: snapshot.householdName,
+      kind: "ready" as const,
+      lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
+      summary: snapshot.summary,
+      updatedAccountId,
+    };
   };
 }
 
-export async function action({ context, request }: Route.ActionArgs) {
-  const formData = await request.formData();
-  const accountId = formData.get("accountId");
-  const displayName = formData.get("displayName");
-  const ownershipType = formData.get("ownershipType");
-  const intent = formData.get("intent");
+export function createAccountReviewAction(deps?: {
+  requireViewerContext?: typeof requireViewerContext;
+  updateAccountCuration?: typeof updateAccountCuration;
+}) {
+  const requireViewer = deps?.requireViewerContext ?? requireViewerContext;
+  const saveAccountCuration =
+    deps?.updateAccountCuration ?? updateAccountCuration;
 
-  if (typeof accountId !== "string" || !accountId.trim()) {
-    return {
-      message: "Choose an account before saving curation changes.",
-      ok: false,
-    } satisfies ActionData;
-  }
+  return async function action({ context, request }: Route.ActionArgs) {
+    const viewer = await requireViewer({ context, request });
+    const env = readCloudflareEnv(context);
+    const formData = await request.formData();
+    const accountId = formData.get("accountId");
+    const displayName = formData.get("displayName");
+    const ownershipType = formData.get("ownershipType");
+    const intent = formData.get("intent");
 
-  if (
-    typeof ownershipType !== "string" ||
-    !ownershipTypes.includes(ownershipType as OwnershipOption)
-  ) {
-    return {
-      accountId,
-      message: "Select a supported ownership label before saving.",
-      ok: false,
-    } satisfies ActionData;
-  }
-
-  const resolvedOwnershipType = ownershipType as OwnershipOption;
-
-  try {
-    await updateAccountCuration(getDb(context.cloudflare.env.DB), {
-      accountId,
-      displayName: typeof displayName === "string" ? displayName : null,
-      includeInHouseholdReporting:
-        formData.get("includeInHouseholdReporting") === "on",
-      isHidden: formData.get("isHidden") === "on",
-      ownershipType: resolvedOwnershipType,
-    });
-
-    if (intent === "inline") {
-      return { accountId, ok: true as const };
+    if (typeof accountId !== "string" || !accountId.trim()) {
+      return {
+        message: "Choose an account before saving curation changes.",
+        ok: false,
+      } satisfies ActionData;
     }
 
-    return redirect(
-      `/accounts/review?updated=${encodeURIComponent(accountId)}`,
-    );
-  } catch (error) {
-    return {
-      accountId,
-      message:
-        error instanceof Error
-          ? error.message
-          : "Account curation failed unexpectedly.",
-      ok: false,
-    } satisfies ActionData;
-  }
+    if (
+      typeof ownershipType !== "string" ||
+      !ownershipTypes.includes(ownershipType as OwnershipOption)
+    ) {
+      return {
+        accountId,
+        message: "Select a supported ownership label before saving.",
+        ok: false,
+      } satisfies ActionData;
+    }
+
+    const resolvedOwnershipType = ownershipType as OwnershipOption;
+
+    try {
+      await saveAccountCuration(getDb(env.DB), {
+        accountId,
+        displayName: typeof displayName === "string" ? displayName : null,
+        householdId: viewer.householdId,
+        includeInHouseholdReporting:
+          formData.get("includeInHouseholdReporting") === "on",
+        isHidden: formData.get("isHidden") === "on",
+        ownershipType: resolvedOwnershipType,
+      });
+
+      if (intent === "inline") {
+        return { accountId, ok: true as const };
+      }
+
+      return redirect(
+        `/accounts/review?updated=${encodeURIComponent(accountId)}`,
+      );
+    } catch (error) {
+      return {
+        accountId,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Account curation failed unexpectedly.",
+        ok: false,
+      } satisfies ActionData;
+    }
+  };
 }
+
+export const loader = createAccountReviewLoader();
+export const action = createAccountReviewAction();
 
 /* ------------------------------------------------------------------ */
 /*  Main screen                                                        */

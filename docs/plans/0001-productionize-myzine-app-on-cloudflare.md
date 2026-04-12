@@ -25,6 +25,12 @@
   - Added D1 identity tables for `members` and `user_identities`.
   - Added a Clerk-backed membership bootstrap helper so first sign-in creates a household owner instead of attaching users to a shared default household.
   - Verified red/green with `bun test ./packages/db/src/identity.test.ts` and `bun run --cwd packages/db typecheck`.
+- 2026-04-11: Completed the first web auth and protected-route slice.
+  - Added Clerk React Router integration in the web app root with middleware, root loader state, and `/sign-in` plus `/sign-up` routes.
+  - Protected `/`, `/portfolio`, `/accounts/review`, and `/connect/plaid` with authenticated household resolution.
+  - Removed shared-household Plaid onboarding behavior so link token creation and public-token exchange now require the authenticated household ID.
+  - Verified with `bun run lint`, `bun run typecheck`, and `bun run test`.
+  - Manual browser verification was attempted via local dev at `http://127.0.0.1:5173/` and `http://localhost:5173/sign-in`, but blocked by a local Clerk handshake/JWKS mismatch from existing dev cookies rather than an app-code failure.
 
 ### Workstream status
 
@@ -35,6 +41,11 @@
 - Workstream 5: Not started.
 - Workstream 6: Not started.
 - Workstream 7: Not started.
+
+### Verification notes
+
+- Automated verification currently passes for the identity and protected-route slices.
+- Local browser verification of Clerk flows requires a clean Clerk dev session and matching local keys. The current machine/browser state produced Clerk handshake token verification failures before route rendering, so that step remains environment-blocked until local Clerk cookies or keys are reset.
 
 ## Non-goals
 

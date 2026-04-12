@@ -1,7 +1,5 @@
 import { createPlaidClient, type PlaidClient } from "@vista/plaid";
 
-const DEFAULT_HOUSEHOLD_ID = "household_default";
-const DEFAULT_HOUSEHOLD_NAME = "Vista Household";
 const PLAID_REQUIRED_PRODUCTS = ["investments"] as const;
 
 type CreatePlaidLinkTokenArgs = {
@@ -15,6 +13,7 @@ type CreatePlaidLinkTokenArgs = {
   countryCodes?: string[];
   database: D1Database;
   environment?: "development" | "production" | "sandbox";
+  householdId: string;
   now?: Date;
   redirectUrl?: string;
   secret?: string;
@@ -30,15 +29,12 @@ type ExchangePlaidPublicTokenArgs = {
   clientId?: string;
   database: D1Database;
   environment?: "development" | "production" | "sandbox";
+  householdId: string;
   institutionId?: string;
   institutionName?: string;
   now?: Date;
   publicToken: string;
   secret?: string;
-};
-
-type HouseholdRow = {
-  id: string;
 };
 
 export type CreatedPlaidLinkToken = {
@@ -52,46 +48,6 @@ export type ExchangedPlaidConnection = {
   householdId: string;
   householdWasCreated: boolean;
 };
-
-async function ensureHousehold(database: D1Database, now: Date) {
-  const existingHousehold = await database
-    .prepare(
-      `
-        select id
-        from households
-        order by created_at asc
-        limit 1
-      `,
-    )
-    .first<HouseholdRow>();
-
-  if (existingHousehold) {
-    return {
-      householdId: existingHousehold.id,
-      householdWasCreated: false,
-    };
-  }
-
-  await database
-    .prepare(
-      `
-        insert into households (id, name, last_synced_at, created_at)
-        values (?, ?, ?, ?)
-      `,
-    )
-    .bind(
-      DEFAULT_HOUSEHOLD_ID,
-      DEFAULT_HOUSEHOLD_NAME,
-      now.getTime(),
-      now.getTime(),
-    )
-    .run();
-
-  return {
-    householdId: DEFAULT_HOUSEHOLD_ID,
-    householdWasCreated: true,
-  };
-}
 
 function resolvePlaidClient(args: {
   client?: PlaidClient;
@@ -119,27 +75,22 @@ function resolvePlaidClient(args: {
 export async function createPlaidLinkToken(
   args: CreatePlaidLinkTokenArgs,
 ): Promise<CreatedPlaidLinkToken> {
-  const now = args.now ?? new Date();
   const client = resolvePlaidClient(args);
 
   if (!client) {
     throw new Error("Plaid client configuration is required.");
   }
 
-  const { householdId, householdWasCreated } = await ensureHousehold(
-    args.database,
-    now,
-  );
   const result = await client.createLinkToken({
     countryCodes: args.countryCodes,
     products: [...PLAID_REQUIRED_PRODUCTS],
     redirectUri: args.redirectUrl,
-    userId: householdId,
+    userId: args.householdId,
   });
 
   return {
-    householdId,
-    householdWasCreated,
+    householdId: args.householdId,
+    householdWasCreated: false,
     linkToken: result.linkToken,
   };
 }
@@ -160,10 +111,6 @@ export async function exchangePlaidPublicToken(
     throw new Error("Plaid did not return a valid connection token.");
   }
 
-  const { householdId, householdWasCreated } = await ensureHousehold(
-    args.database,
-    now,
-  );
   const exchangeResult = await client.exchangePublicToken({
     publicToken,
   });
@@ -200,7 +147,7 @@ export async function exchangePlaidPublicToken(
     )
     .bind(
       connectionId,
-      householdId,
+      args.householdId,
       "plaid",
       "active",
       exchangeResult.itemId,
@@ -215,7 +162,7 @@ export async function exchangePlaidPublicToken(
 
   return {
     connectionId,
-    householdId,
-    householdWasCreated,
+    householdId: args.householdId,
+    householdWasCreated: false,
   };
 }

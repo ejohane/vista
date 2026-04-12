@@ -26,12 +26,14 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
+import { requireViewerContext } from "@/lib/auth.server";
 import {
   formatCompactUsd,
   formatSignedUsd,
   formatUpdatedAt,
   formatUsd,
 } from "@/lib/format";
+import { readCloudflareEnv } from "@/lib/server-context";
 import { cn } from "@/lib/utils";
 import type { Route } from "./+types/home";
 
@@ -272,34 +274,50 @@ export function meta(_: Route.MetaArgs) {
   ];
 }
 
-export async function loader({ context }: Route.LoaderArgs) {
-  const snapshot = await getHomepageSnapshot(getDb(context.cloudflare.env.DB));
+export function createHomeLoader(deps?: {
+  getHomepageSnapshot?: typeof getHomepageSnapshot;
+  requireViewerContext?: typeof requireViewerContext;
+}) {
+  const loadHomepageSnapshot = deps?.getHomepageSnapshot ?? getHomepageSnapshot;
+  const requireViewer = deps?.requireViewerContext ?? requireViewerContext;
 
-  if (!snapshot) {
+  return async function loader({ context, request }: Route.LoaderArgs) {
+    const viewer = await requireViewer({ context, request });
+    const env = readCloudflareEnv(context);
+    const snapshot = await loadHomepageSnapshot(
+      getDb(env.DB),
+      viewer.householdId,
+    );
+
+    if (!snapshot) {
+      return {
+        kind: "empty" as const,
+        nextStepCommand: "bun run db:seed:local",
+      };
+    }
+
     return {
-      kind: "empty" as const,
-      nextStepCommand: "bun run db:seed:local",
+      kind: "ready" as const,
+      changeSummary: snapshot.changeSummary,
+      connectionStates: snapshot.connectionStates
+        .filter((state) => isSupportedProvider(state.provider))
+        .map((state) => ({
+          ...state,
+          lastSuccessfulSyncAt:
+            state.lastSuccessfulSyncAt?.toISOString() ?? null,
+          latestRunAt: state.latestRunAt?.toISOString() ?? null,
+        })),
+      hasSuccessfulSync: snapshot.hasSuccessfulSync,
+      history: snapshot.history,
+      householdName: snapshot.householdName,
+      lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
+      reportingGroups: snapshot.reportingGroups,
+      totals: snapshot.totals,
     };
-  }
-
-  return {
-    kind: "ready" as const,
-    changeSummary: snapshot.changeSummary,
-    connectionStates: snapshot.connectionStates
-      .filter((state) => isSupportedProvider(state.provider))
-      .map((state) => ({
-        ...state,
-        lastSuccessfulSyncAt: state.lastSuccessfulSyncAt?.toISOString() ?? null,
-        latestRunAt: state.latestRunAt?.toISOString() ?? null,
-      })),
-    hasSuccessfulSync: snapshot.hasSuccessfulSync,
-    history: snapshot.history,
-    householdName: snapshot.householdName,
-    lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
-    reportingGroups: snapshot.reportingGroups,
-    totals: snapshot.totals,
   };
 }
+
+export const loader = createHomeLoader();
 
 // ── Page ───────────────────────────────────────────────────
 

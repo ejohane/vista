@@ -12,12 +12,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { requireViewerContext } from "@/lib/auth.server";
 import {
   formatCompactUsd,
   formatSignedUsd,
   formatUpdatedAt,
   formatUsd,
 } from "@/lib/format";
+import { readCloudflareEnv } from "@/lib/server-context";
 import { cn } from "@/lib/utils";
 import type { Route } from "./+types/portfolio";
 
@@ -175,22 +177,40 @@ export function meta(_: Route.MetaArgs) {
   ];
 }
 
-export async function loader({ context }: Route.LoaderArgs) {
-  const snapshot = await getPortfolioSnapshot(getDb(context.cloudflare.env.DB));
+export function createPortfolioLoader(deps?: {
+  getPortfolioSnapshot?: typeof getPortfolioSnapshot;
+  requireViewerContext?: typeof requireViewerContext;
+}) {
+  const loadPortfolioSnapshot =
+    deps?.getPortfolioSnapshot ?? getPortfolioSnapshot;
+  const requireViewer = deps?.requireViewerContext ?? requireViewerContext;
 
-  if (!snapshot) return { kind: "empty" as const };
+  return async function loader({ context, request }: Route.LoaderArgs) {
+    const viewer = await requireViewer({ context, request });
+    const env = readCloudflareEnv(context);
+    const snapshot = await loadPortfolioSnapshot(
+      getDb(env.DB),
+      viewer.householdId,
+    );
 
-  return {
-    accounts: snapshot.accounts,
-    allocationBuckets: snapshot.allocationBuckets,
-    asOfDate: snapshot.asOfDate,
-    householdName: snapshot.householdName,
-    kind: "ready" as const,
-    lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
-    topHoldings: snapshot.topHoldings,
-    totals: snapshot.totals,
+    if (!snapshot) {
+      return { kind: "empty" as const };
+    }
+
+    return {
+      accounts: snapshot.accounts,
+      allocationBuckets: snapshot.allocationBuckets,
+      asOfDate: snapshot.asOfDate,
+      householdName: snapshot.householdName,
+      kind: "ready" as const,
+      lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
+      topHoldings: snapshot.topHoldings,
+      totals: snapshot.totals,
+    };
   };
 }
+
+export const loader = createPortfolioLoader();
 
 // ── Page ───────────────────────────────────────────────────
 

@@ -1,11 +1,15 @@
 import { Database } from "bun:sqlite";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createMemoryRouter, RouterProvider } from "react-router";
 
-import { AccountReviewScreen, action } from "./account-review";
+import {
+  AccountReviewScreen,
+  createAccountReviewAction,
+  createAccountReviewLoader,
+} from "./account-review";
 
 class FakeD1PreparedStatement {
   constructor(
@@ -164,10 +168,73 @@ function buildActionRequest() {
 }
 
 describe("account review route", () => {
+  test("loads account curation for the authenticated household", async () => {
+    const getAccountCurationSnapshotMock = mock(async () => ({
+      accounts: [],
+      householdId: "household_viewer",
+      householdName: "My Household",
+      lastSyncedAt: new Date("2026-04-11T14:00:00.000Z"),
+      summary: {
+        excludedCount: 0,
+        hiddenCount: 0,
+        includedCount: 0,
+      },
+    }));
+    const requireViewerContextMock = mock(async () => ({
+      clerkUserId: "user_123",
+      householdId: "household_viewer",
+      householdName: "My Household",
+      memberId: "member_viewer",
+      memberRole: "owner" as const,
+    }));
+    const loader = createAccountReviewLoader({
+      getAccountCurationSnapshot: getAccountCurationSnapshotMock,
+      requireViewerContext: requireViewerContextMock,
+    });
+
+    const result = await loader({
+      context: {
+        cloudflare: {
+          env: {
+            DB: {} as D1Database,
+          },
+        },
+      },
+      request: new Request("http://localhost/accounts/review"),
+    } as never);
+
+    expect(requireViewerContextMock).toHaveBeenCalled();
+    expect(getAccountCurationSnapshotMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "household_viewer",
+    );
+    expect(result).toEqual({
+      accounts: [],
+      householdName: "My Household",
+      kind: "ready",
+      lastSyncedAt: "2026-04-11T14:00:00.000Z",
+      summary: {
+        excludedCount: 0,
+        hiddenCount: 0,
+        includedCount: 0,
+      },
+      updatedAccountId: null,
+    });
+  });
+
   test("updates account curation and redirects back to the review screen", async () => {
     const { d1, sqlite } = createAccountReviewTestDatabase();
+    const testAction = createAccountReviewAction({
+      requireViewerContext: mock(async () => ({
+        clerkUserId: "user_123",
+        householdId: "household_demo",
+        householdName: "Vista Household",
+        memberId: "member_viewer",
+        memberRole: "owner" as const,
+      })),
+    });
 
-    const response = (await action({
+    const response = (await testAction({
       context: {
         cloudflare: {
           env: {
@@ -200,6 +267,45 @@ describe("account review route", () => {
       displayName: "Household Operating",
       includeInHouseholdReporting: 0,
       isHidden: 1,
+      ownershipType: "mine",
+    });
+  });
+
+  test("passes the authenticated household id into account updates", async () => {
+    const updateAccountCurationMock = mock(async () => ({
+      accountId: "acct_checking",
+      effectiveName: "Household Operating",
+    }));
+    const requireViewerContextMock = mock(async () => ({
+      clerkUserId: "user_123",
+      householdId: "household_viewer",
+      householdName: "My Household",
+      memberId: "member_viewer",
+      memberRole: "owner" as const,
+    }));
+    const testAction = createAccountReviewAction({
+      requireViewerContext: requireViewerContextMock,
+      updateAccountCuration: updateAccountCurationMock,
+    });
+
+    const response = (await testAction({
+      context: {
+        cloudflare: {
+          env: {
+            DB: {} as D1Database,
+          },
+        },
+      },
+      request: buildActionRequest(),
+    } as never)) as Response;
+
+    expect(response.status).toBe(302);
+    expect(updateAccountCurationMock).toHaveBeenCalledWith(expect.anything(), {
+      accountId: "acct_checking",
+      displayName: "Household Operating",
+      householdId: "household_viewer",
+      includeInHouseholdReporting: false,
+      isHidden: true,
       ownershipType: "mine",
     });
   });

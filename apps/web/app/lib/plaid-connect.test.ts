@@ -104,12 +104,13 @@ describe("exchangePlaidPublicToken", () => {
         },
       },
       database: d1,
+      householdId: "household_viewer",
       now: new Date("2026-03-26T21:00:00.000Z"),
     });
 
     expect(result).toEqual({
-      householdId: "household_default",
-      householdWasCreated: true,
+      householdId: "household_viewer",
+      householdWasCreated: false,
       linkToken: "link-sandbox-456",
     });
     expect(createLinkTokenCalls).toEqual([
@@ -117,13 +118,23 @@ describe("exchangePlaidPublicToken", () => {
         countryCodes: undefined,
         products: ["investments"],
         redirectUri: undefined,
-        userId: "household_default",
+        userId: "household_viewer",
       },
     ]);
   });
 
-  test("exchanges the public token, creates a household, and stores the Plaid connection", async () => {
+  test("exchanges the public token for the authenticated household and stores the Plaid connection", async () => {
     const { d1, sqlite } = createWebTestDatabase();
+    const now = new Date("2026-03-26T21:00:00.000Z");
+
+    sqlite
+      .query(
+        `
+          insert into households (id, name, last_synced_at, created_at)
+          values (?, ?, ?, ?)
+        `,
+      )
+      .run("household_viewer", "My Household", now.getTime(), now.getTime());
 
     const result = await exchangePlaidPublicToken({
       client: {
@@ -142,16 +153,17 @@ describe("exchangePlaidPublicToken", () => {
         },
       },
       database: d1,
+      householdId: "household_viewer",
       institutionId: "ins_109508",
       institutionName: "Vanguard",
-      now: new Date("2026-03-26T21:00:00.000Z"),
+      now,
       publicToken: "public-sandbox-123",
     });
 
     expect(result).toEqual({
       connectionId: "conn:plaid:item-sandbox-123",
-      householdId: "household_default",
-      householdWasCreated: true,
+      householdId: "household_viewer",
+      householdWasCreated: false,
     });
     expect(
       sqlite

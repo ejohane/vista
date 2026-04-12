@@ -23,10 +23,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { requireViewerContext } from "@/lib/auth.server";
 import {
   createPlaidLinkToken,
   exchangePlaidPublicToken,
 } from "@/lib/plaid-connect";
+import { readCloudflareEnv } from "@/lib/server-context";
 import { cn } from "@/lib/utils";
 import type { Route } from "./+types/connect-plaid";
 
@@ -160,10 +162,12 @@ function persistPlaidOAuthToken(linkToken: string) {
 
 export function createConnectPlaidAction(deps?: {
   exchangePlaidPublicToken?: ExchangePlaidPublicTokenFn;
+  requireViewerContext?: typeof requireViewerContext;
   syncPlaidConnection?: SyncPlaidConnectionFn;
 }) {
   const exchangeConnection =
     deps?.exchangePlaidPublicToken ?? exchangePlaidPublicToken;
+  const requireViewer = deps?.requireViewerContext ?? requireViewerContext;
   const syncConnection = deps?.syncPlaidConnection ?? syncPlaidConnection;
 
   return async function action({
@@ -173,18 +177,15 @@ export function createConnectPlaidAction(deps?: {
     context: { cloudflare: { env: Env } };
     request: Request;
   }) {
-    const clientId = readOptionalEnvString(
-      context.cloudflare.env,
-      "PLAID_CLIENT_ID",
-    );
-    const secret = readOptionalEnvString(
-      context.cloudflare.env,
-      "PLAID_SECRET",
-    );
-    const environment = readOptionalEnvString(
-      context.cloudflare.env,
-      "PLAID_ENV",
-    ) as "development" | "production" | "sandbox" | undefined;
+    const viewer = await requireViewer({ context, request });
+    const env = readCloudflareEnv(context);
+    const clientId = readOptionalEnvString(env, "PLAID_CLIENT_ID");
+    const secret = readOptionalEnvString(env, "PLAID_SECRET");
+    const environment = readOptionalEnvString(env, "PLAID_ENV") as
+      | "development"
+      | "production"
+      | "sandbox"
+      | undefined;
 
     if (!clientId || !secret) {
       return {
@@ -209,8 +210,9 @@ export function createConnectPlaidAction(deps?: {
     try {
       const result = await exchangeConnection({
         clientId,
-        database: context.cloudflare.env.DB,
+        database: env.DB,
         environment,
+        householdId: viewer.householdId,
         institutionId:
           typeof institutionId === "string" ? institutionId : undefined,
         institutionName:
@@ -223,7 +225,7 @@ export function createConnectPlaidAction(deps?: {
         await syncConnection({
           clientId,
           connectionId: result.connectionId,
-          database: context.cloudflare.env.DB,
+          database: env.DB,
           environment,
           secret,
         });
@@ -274,8 +276,10 @@ function buildLoaderErrorData(title: string, message: string) {
 
 export function createConnectPlaidLoader(deps?: {
   createPlaidLinkToken?: CreatePlaidLinkTokenFn;
+  requireViewerContext?: typeof requireViewerContext;
 }) {
   const createLinkToken = deps?.createPlaidLinkToken ?? createPlaidLinkToken;
+  const requireViewer = deps?.requireViewerContext ?? requireViewerContext;
 
   return async function loader({
     context,
@@ -284,20 +288,17 @@ export function createConnectPlaidLoader(deps?: {
     context: { cloudflare: { env: Env } };
     request: Request;
   }): Promise<LoaderData> {
-    const clientId = readOptionalEnvString(
-      context.cloudflare.env,
-      "PLAID_CLIENT_ID",
-    );
-    const secret = readOptionalEnvString(
-      context.cloudflare.env,
-      "PLAID_SECRET",
-    );
-    const environment = readOptionalEnvString(
-      context.cloudflare.env,
-      "PLAID_ENV",
-    ) as "development" | "production" | "sandbox" | undefined;
+    const viewer = await requireViewer({ context, request });
+    const env = readCloudflareEnv(context);
+    const clientId = readOptionalEnvString(env, "PLAID_CLIENT_ID");
+    const secret = readOptionalEnvString(env, "PLAID_SECRET");
+    const environment = readOptionalEnvString(env, "PLAID_ENV") as
+      | "development"
+      | "production"
+      | "sandbox"
+      | undefined;
     const configuredRedirectUrl = readOptionalEnvString(
-      context.cloudflare.env,
+      env,
       "PLAID_REDIRECT_URI",
     );
 
@@ -311,8 +312,9 @@ export function createConnectPlaidLoader(deps?: {
     try {
       const result = await createLinkToken({
         clientId,
-        database: context.cloudflare.env.DB,
+        database: env.DB,
         environment,
+        householdId: viewer.householdId,
         redirectUrl: buildPlaidRedirectUrl({
           configuredRedirectUrl,
           requestUrl: request.url,

@@ -1,9 +1,71 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { PortfolioScreen } from "./portfolio";
+import { createPortfolioLoader, PortfolioScreen } from "./portfolio";
 
 describe("portfolio route", () => {
+  test("loads the portfolio for the authenticated household", async () => {
+    const getPortfolioSnapshotMock = mock(async () => ({
+      accounts: [],
+      allocationBuckets: [],
+      asOfDate: "2026-04-11",
+      householdName: "My Household",
+      lastSyncedAt: new Date("2026-04-11T14:00:00.000Z"),
+      topHoldings: [],
+      totals: {
+        accountCount: 0,
+        costBasisMinor: 0,
+        holdingCount: 0,
+        marketValueMinor: 0,
+        unrealizedGainMinor: 0,
+      },
+    }));
+    const requireViewerContextMock = mock(async () => ({
+      clerkUserId: "user_123",
+      householdId: "household_viewer",
+      householdName: "My Household",
+      memberId: "member_viewer",
+      memberRole: "owner" as const,
+    }));
+    const loader = createPortfolioLoader({
+      getPortfolioSnapshot: getPortfolioSnapshotMock,
+      requireViewerContext: requireViewerContextMock,
+    });
+
+    const result = await loader({
+      context: {
+        cloudflare: {
+          env: {
+            DB: {} as D1Database,
+          },
+        },
+      },
+      request: new Request("http://localhost/portfolio"),
+    } as never);
+
+    expect(requireViewerContextMock).toHaveBeenCalled();
+    expect(getPortfolioSnapshotMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "household_viewer",
+    );
+    expect(result).toEqual({
+      accounts: [],
+      allocationBuckets: [],
+      asOfDate: "2026-04-11",
+      householdName: "My Household",
+      kind: "ready",
+      lastSyncedAt: "2026-04-11T14:00:00.000Z",
+      topHoldings: [],
+      totals: {
+        accountCount: 0,
+        costBasisMinor: 0,
+        holdingCount: 0,
+        marketValueMinor: 0,
+        unrealizedGainMinor: 0,
+      },
+    });
+  });
+
   test("renders a populated portfolio allocation view", () => {
     const html = renderToStaticMarkup(
       <PortfolioScreen
