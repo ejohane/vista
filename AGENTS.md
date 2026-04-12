@@ -60,6 +60,8 @@ It documents the commands and coding conventions actually used in this repositor
   - `bun run db:generate`
 - Apply local D1 migrations:
   - `bun run db:migrate:local`
+- Reset the local D1 database to an empty post-migration state:
+  - `bun run db:reset`
 - Seed local D1 demo data:
   - `bun run db:seed:local`
 - Launch Drizzle Studio against the current worktree's local D1 SQLite file:

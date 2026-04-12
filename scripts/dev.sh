@@ -5,6 +5,7 @@ WORKTREE_PATH=$(pwd)
 MAIN_WORKTREE=$(git worktree list | head -1 | awk '{print $1}')
 STATE_DIR="apps/web/.wrangler/state"
 SEEDED_MARKER="$STATE_DIR/.seeded-from-main"
+SKIP_SEED_MARKER="$STATE_DIR/.skip-seed-from-main"
 
 port_in_use() {
     command -v lsof >/dev/null 2>&1 && lsof -i :$1 >/dev/null 2>&1
@@ -68,12 +69,14 @@ echo "[dev] Main:     $MAIN_WORKTREE"
 echo "[dev] Web:      http://$DEV_HOST:$WEB_PORT"
 echo "[dev] Sync:     http://$DEV_HOST:$SYNC_PORT"
 
-if [ "$WORKTREE_PATH" != "$MAIN_WORKTREE" ] && [ ! -f "$SEEDED_MARKER" ] && [ -d "$MAIN_WORKTREE/$STATE_DIR" ]; then
+if [ "$WORKTREE_PATH" != "$MAIN_WORKTREE" ] && [ ! -f "$SEEDED_MARKER" ] && [ ! -f "$SKIP_SEED_MARKER" ] && [ -d "$MAIN_WORKTREE/$STATE_DIR" ]; then
     echo "[dev] Seeding local worker state from main worktree"
     mkdir -p "$(dirname "$STATE_DIR")"
     cp -R "$MAIN_WORKTREE/$STATE_DIR" "$STATE_DIR"
     echo "Seeded from $MAIN_WORKTREE on $(date)" > "$SEEDED_MARKER"
     echo "[dev] State copied into $STATE_DIR"
+elif [ "$WORKTREE_PATH" != "$MAIN_WORKTREE" ] && [ -f "$SKIP_SEED_MARKER" ]; then
+    echo "[dev] Keeping fresh local worker state without re-seeding from main"
 elif [ "$WORKTREE_PATH" = "$MAIN_WORKTREE" ]; then
     echo "[dev] Running in main worktree"
 elif [ ! -d "$MAIN_WORKTREE/$STATE_DIR" ]; then

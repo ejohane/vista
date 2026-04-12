@@ -15,6 +15,8 @@
     "cf-typegen": "bun run --cwd apps/web cf-typegen && bun run --cwd apps/sync cf-typegen && bun run --cwd apps/state cf-typegen",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply vista-dev --local --config apps/web/wrangler.jsonc",
+    "db:reset": "./scripts/db-reset-local.sh",
+    "db:reset:local": "./scripts/db-reset-local.sh",
     "db:seed:local": "wrangler d1 execute vista-dev --local --config apps/web/wrangler.jsonc --file packages/db/seeds/dev.sql",
     "db:studio:local": "bun run scripts/db-studio-local.ts",
     "dev": "bun run scripts/dev.ts",
