@@ -1,79 +1,40 @@
-# Welcome to React Router!
+# Vista Web
 
-A modern, production-ready template for building full-stack React applications using React Router.
+The web app is the authenticated React Router SSR frontend for Vista. It runs on the Cloudflare Worker entrypoint in `workers/app.ts` and shares D1 state with the sync worker.
 
-## Features
+## Local development
 
-- 🚀 Server-side rendering
-- ⚡️ Hot Module Replacement (HMR)
-- 📦 Asset bundling and optimization
-- 🔄 Data loading and mutations
-- 🔒 TypeScript by default
-- 🎉 TailwindCSS for styling
-- 📖 [React Router docs](https://reactrouter.com/)
-
-## Getting Started
-
-### Installation
-
-Install the dependencies:
+Install dependencies from the repo root:
 
 ```bash
-npm install
+bun install
 ```
 
-### Development
-
-Start the development server with HMR:
+Copy the repo-level `.env.example` to `.env.local`, add your Clerk and Plaid credentials, then start the full local stack from the repo root:
 
 ```bash
-npm run dev
+bun run dev
 ```
 
-Your application will be available at `http://127.0.0.1:5173` by default, or at `http://$VISTA_DEV_HOST:$VISTA_WEB_PORT` when those environment variables are set.
+The web app is available at `http://127.0.0.1:5173` by default, or at `http://$VISTA_DEV_HOST:$VISTA_WEB_PORT` when those environment variables are set.
 
-## Previewing the Production Build
+## Useful commands
 
-Preview the production build locally:
+From the repo root:
 
 ```bash
-npm run preview
+bun run build:web
+bun run typecheck
+bun test apps/web/app/routes/home.test.tsx
 ```
 
-## Building for Production
+## Production deploys
 
-Create a production build:
+Production deploys are driven from the repo root so the web and sync workers stay in lockstep:
 
 ```bash
-npm run build
+bun run db:migrate:prod
+bun run deploy:prod:web
 ```
 
-## Deployment
-
-Deployment is done using the Wrangler CLI.
-
-To build and deploy directly to production:
-
-```sh
-npm run deploy
-```
-
-To deploy a preview URL:
-
-```sh
-npx wrangler versions upload
-```
-
-You can then promote a version to production after verification or roll it out progressively.
-
-```sh
-npx wrangler versions deploy
-```
-
-## Styling
-
-This template comes with [Tailwind CSS](https://tailwindcss.com/) already configured for a simple default starting experience. You can use whatever CSS framework you prefer.
-
----
-
-Built with ❤️ using React Router.
+Before using the production scripts, set `VISTA_PROD_D1_DATABASE_ID` and optionally `VISTA_PROD_PREVIEW_D1_DATABASE_ID` in your shell or CI environment. The full launch and rollback process lives in `docs/ops/0002-production-runbook.md`.

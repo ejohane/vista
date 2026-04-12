@@ -1,0 +1,140 @@
+name: Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      VISTA_PROD_D1_DATABASE_ID: ${{ vars.VISTA_PROD_D1_DATABASE_ID }}
+      VISTA_PROD_PREVIEW_D1_DATABASE_ID: ${{ vars.VISTA_PROD_PREVIEW_D1_DATABASE_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate production Wrangler config
+        run: bun run prepare:prod-config
+
+      - name: Apply production D1 migrations
+        run: bun run db:migrate:prod
+
+  deploy-web:
+    runs-on: ubuntu-latest
+    needs: migrate
+    environment: production
+    permissions:
+      contents: read
+    env:
+      CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      PLAID_CLIENT_ID: ${{ secrets.PLAID_CLIENT_ID }}
+      PLAID_SECRET: ${{ secrets.PLAID_SECRET }}
+      PROVIDER_TOKEN_ENCRYPTION_KEY: ${{ secrets.PROVIDER_TOKEN_ENCRYPTION_KEY }}
+      VISTA_PROD_D1_DATABASE_ID: ${{ vars.VISTA_PROD_D1_DATABASE_ID }}
+      VISTA_PROD_PREVIEW_D1_DATABASE_ID: ${{ vars.VISTA_PROD_PREVIEW_D1_DATABASE_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate production Wrangler config
+        run: bun run prepare:prod-config
+
+      - name: Sync web production secrets
+        run: |
+          printf '%s' "$CLERK_PUBLISHABLE_KEY" | bunx wrangler secret put CLERK_PUBLISHABLE_KEY --config apps/web/wrangler.prod.jsonc --env prod
+          printf '%s' "$CLERK_SECRET_KEY" | bunx wrangler secret put CLERK_SECRET_KEY --config apps/web/wrangler.prod.jsonc --env prod
+          printf '%s' "$PLAID_CLIENT_ID" | bunx wrangler secret put PLAID_CLIENT_ID --config apps/web/wrangler.prod.jsonc --env prod
+          printf '%s' "$PLAID_SECRET" | bunx wrangler secret put PLAID_SECRET --config apps/web/wrangler.prod.jsonc --env prod
+          printf '%s' "$PROVIDER_TOKEN_ENCRYPTION_KEY" | bunx wrangler secret put PROVIDER_TOKEN_ENCRYPTION_KEY --config apps/web/wrangler.prod.jsonc --env prod
+
+      - name: Deploy web worker
+        run: bun run deploy:prod:web
+
+  deploy-sync:
+    runs-on: ubuntu-latest
+    needs: migrate
+    environment: production
+    permissions:
+      contents: read
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      PLAID_CLIENT_ID: ${{ secrets.PLAID_CLIENT_ID }}
+      PLAID_SECRET: ${{ secrets.PLAID_SECRET }}
+      PROVIDER_TOKEN_ENCRYPTION_KEY: ${{ secrets.PROVIDER_TOKEN_ENCRYPTION_KEY }}
+      VISTA_PROD_D1_DATABASE_ID: ${{ vars.VISTA_PROD_D1_DATABASE_ID }}
+      VISTA_PROD_PREVIEW_D1_DATABASE_ID: ${{ vars.VISTA_PROD_PREVIEW_D1_DATABASE_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate production Wrangler config
+        run: bun run prepare:prod-config
+
+      - name: Sync sync-worker production secrets
+        run: |
+          printf '%s' "$PLAID_CLIENT_ID" | bunx wrangler secret put PLAID_CLIENT_ID --config apps/sync/wrangler.prod.jsonc --env prod
+          printf '%s' "$PLAID_SECRET" | bunx wrangler secret put PLAID_SECRET --config apps/sync/wrangler.prod.jsonc --env prod
+          printf '%s' "$PROVIDER_TOKEN_ENCRYPTION_KEY" | bunx wrangler secret put PROVIDER_TOKEN_ENCRYPTION_KEY --config apps/sync/wrangler.prod.jsonc --env prod
+
+      - name: Deploy sync worker
+        run: bun run deploy:prod:sync
+
+  smoke-check:
+    runs-on: ubuntu-latest
+    needs:
+      - deploy-web
+      - deploy-sync
+    steps:
+      - name: Verify anonymous traffic redirects to sign-in
+        run: |
+          headers_file="$(mktemp)"
+          curl --silent --show-error --output /dev/null --dump-header "$headers_file" https://myzine.app/
+          grep -iq '^location: /sign-in' "$headers_file"
+
+      - name: Verify sign-in route renders
+        run: |
+          status_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' https://myzine.app/sign-in)"
+          test "$status_code" = "200"

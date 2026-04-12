@@ -228,6 +228,10 @@ export default {
                     | "sandbox"
                     | undefined) ?? undefined,
                 now,
+                providerTokenEncryptionKey: readOptionalEnvString(
+                  env,
+                  "PROVIDER_TOKEN_ENCRYPTION_KEY",
+                ),
                 secret: readOptionalEnvString(env, "PLAID_SECRET"),
               })),
               ...(await syncStateBackedPlaidConnections(env, now)),
@@ -242,6 +246,10 @@ export default {
                   | "sandbox"
                   | undefined) ?? undefined,
               now,
+              providerTokenEncryptionKey: readOptionalEnvString(
+                env,
+                "PROVIDER_TOKEN_ENCRYPTION_KEY",
+              ),
               secret: readOptionalEnvString(env, "PLAID_SECRET"),
             });
     const syncResults = [...plaidResults];

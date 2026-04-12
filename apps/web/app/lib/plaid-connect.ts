@@ -1,4 +1,8 @@
-import { createPlaidClient, type PlaidClient } from "@vista/plaid";
+import {
+  createPlaidClient,
+  encryptProviderToken,
+  type PlaidClient,
+} from "@vista/plaid";
 
 const DEFAULT_HOUSEHOLD_NAME = "Vista Household";
 const PLAID_REQUIRED_PRODUCTS = ["investments"] as const;
@@ -23,6 +27,7 @@ type CreatePlaidLinkTokenArgs = {
   householdId?: string;
   householdName?: string;
   now?: Date;
+  providerTokenEncryptionKey?: string;
   redirectUrl?: string;
   secret?: string;
 };
@@ -55,6 +60,7 @@ type ExchangePlaidPublicTokenArgs = {
     updatedAt: Date;
   }) => Promise<void>;
   persistAccessTokenInDatabase?: boolean;
+  providerTokenEncryptionKey?: string;
   publicToken: string;
   secret?: string;
 };
@@ -250,6 +256,9 @@ export async function exchangePlaidPublicToken(
     throw new Error("Plaid did not return a valid connection token.");
   }
 
+  const persistAccessTokenInDatabase =
+    args.persistAccessTokenInDatabase ?? true;
+
   const { householdId, householdWasCreated } = await ensureHousehold(
     args.database,
     now,
@@ -262,11 +271,21 @@ export async function exchangePlaidPublicToken(
   const exchangeResult = await client.exchangePublicToken({
     publicToken,
   });
+  const encryptedAccessToken = persistAccessTokenInDatabase
+    ? await encryptProviderToken({
+        plaintext: exchangeResult.accessToken,
+        secret:
+          args.providerTokenEncryptionKey ??
+          (() => {
+            throw new Error(
+              "Provider token encryption key is required to store Plaid credentials.",
+            );
+          })(),
+      })
+    : null;
   const connectionId = `conn:plaid:${exchangeResult.itemId}`;
   const institutionId = args.institutionId?.trim() || null;
   const institutionName = args.institutionName?.trim() || "Plaid";
-  const persistAccessTokenInDatabase =
-    args.persistAccessTokenInDatabase ?? true;
 
   await args.database
     .prepare(
@@ -278,17 +297,21 @@ export async function exchangePlaidPublicToken(
           status,
           external_connection_id,
           access_token,
+          access_token_encrypted,
+          credential_key_version,
           plaid_item_id,
           institution_id,
           institution_name,
           created_at,
           updated_at
         )
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict(provider, external_connection_id) do update set
           household_id = excluded.household_id,
           status = excluded.status,
           access_token = excluded.access_token,
+          access_token_encrypted = excluded.access_token_encrypted,
+          credential_key_version = excluded.credential_key_version,
           plaid_item_id = excluded.plaid_item_id,
           institution_id = excluded.institution_id,
           institution_name = excluded.institution_name,
@@ -301,7 +324,9 @@ export async function exchangePlaidPublicToken(
       "plaid",
       "active",
       exchangeResult.itemId,
-      persistAccessTokenInDatabase ? exchangeResult.accessToken : null,
+      null,
+      encryptedAccessToken,
+      persistAccessTokenInDatabase ? 1 : null,
       exchangeResult.itemId,
       institutionId,
       institutionName,

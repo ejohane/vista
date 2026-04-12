@@ -28,14 +28,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { requireViewerContext } from "@/lib/auth";
 import {
   buildHouseholdPath,
-  readRequestedHouseholdId,
+  resolveViewerHouseholdId,
 } from "@/lib/household-routing";
 import {
   createPlaidLinkToken,
   exchangePlaidPublicToken,
 } from "@/lib/plaid-connect";
+import { readCloudflareEnv } from "@/lib/server-context";
 import { cn } from "@/lib/utils";
 import type { Route } from "./+types/connect-plaid";
 
@@ -114,7 +116,12 @@ declare global {
 
 function readOptionalEnvString(
   env: unknown,
-  key: "PLAID_CLIENT_ID" | "PLAID_ENV" | "PLAID_REDIRECT_URI" | "PLAID_SECRET",
+  key:
+    | "PLAID_CLIENT_ID"
+    | "PLAID_ENV"
+    | "PLAID_REDIRECT_URI"
+    | "PLAID_SECRET"
+    | "PROVIDER_TOKEN_ENCRYPTION_KEY",
 ) {
   const record = env as Record<string, unknown>;
   const value = record[key];
@@ -170,10 +177,12 @@ function persistPlaidOAuthToken(linkToken: string) {
 
 export function createConnectPlaidAction(deps?: {
   exchangePlaidPublicToken?: ExchangePlaidPublicTokenFn;
+  requireViewerContext?: typeof requireViewerContext;
   syncPlaidConnection?: SyncPlaidConnectionFn;
 }) {
   const exchangeConnection =
     deps?.exchangePlaidPublicToken ?? exchangePlaidPublicToken;
+  const requireViewer = deps?.requireViewerContext ?? requireViewerContext;
   const syncConnection = deps?.syncPlaidConnection ?? syncPlaidConnection;
 
   return async function action({
@@ -183,23 +192,24 @@ export function createConnectPlaidAction(deps?: {
     context: { cloudflare: { env: Env } };
     request: Request;
   }) {
-    const clientId = readOptionalEnvString(
-      context.cloudflare.env,
-      "PLAID_CLIENT_ID",
+    const viewer = await requireViewer({ context, request });
+    const env = readCloudflareEnv(context);
+    const clientId = readOptionalEnvString(env, "PLAID_CLIENT_ID");
+    const secret = readOptionalEnvString(env, "PLAID_SECRET");
+    const providerTokenEncryptionKey = readOptionalEnvString(
+      env,
+      "PROVIDER_TOKEN_ENCRYPTION_KEY",
     );
-    const secret = readOptionalEnvString(
-      context.cloudflare.env,
-      "PLAID_SECRET",
-    );
-    const environment = readOptionalEnvString(
-      context.cloudflare.env,
-      "PLAID_ENV",
-    ) as "development" | "production" | "sandbox" | undefined;
+    const environment = readOptionalEnvString(env, "PLAID_ENV") as
+      | "development"
+      | "production"
+      | "sandbox"
+      | undefined;
 
-    if (!clientId || !secret) {
+    if (!clientId || !secret || !providerTokenEncryptionKey) {
       return {
         message:
-          "Set PLAID_CLIENT_ID and PLAID_SECRET before starting Plaid onboarding.",
+          "Set PLAID_CLIENT_ID, PLAID_SECRET, and PROVIDER_TOKEN_ENCRYPTION_KEY before starting Plaid onboarding.",
         ok: false,
       } satisfies ActionData;
     }
@@ -209,6 +219,17 @@ export function createConnectPlaidAction(deps?: {
     const householdId = formData.get("householdId");
     const institutionId = formData.get("institutionId");
     const institutionName = formData.get("institutionName");
+    const selectedHouseholdId =
+      typeof householdId === "string" && householdId.trim()
+        ? householdId.trim()
+        : resolveViewerHouseholdId(request, viewer.householdId);
+
+    if (selectedHouseholdId !== viewer.householdId) {
+      return {
+        message: "The requested household is not available.",
+        ok: false,
+      } satisfies ActionData;
+    }
 
     if (typeof publicToken !== "string" || !publicToken.trim()) {
       return {
@@ -225,16 +246,14 @@ export function createConnectPlaidAction(deps?: {
     try {
       const result = await exchangeConnection({
         clientId,
-        database: context.cloudflare.env.DB,
+        database: env.DB,
         environment,
-        householdId:
-          typeof householdId === "string" && householdId.trim()
-            ? householdId.trim()
-            : (readRequestedHouseholdId(request) ?? undefined),
+        householdId: selectedHouseholdId,
         institutionId:
           typeof institutionId === "string" ? institutionId : undefined,
         institutionName:
           typeof institutionName === "string" ? institutionName : undefined,
+        providerTokenEncryptionKey,
         onConnectionPersisted:
           stateClient && stateMode !== "legacy"
             ? async (connection) => {
@@ -279,6 +298,7 @@ export function createConnectPlaidAction(deps?: {
             connectionId: result.connectionId,
             database: context.cloudflare.env.DB,
             environment,
+            providerTokenEncryptionKey,
             secret,
           });
 
@@ -296,6 +316,7 @@ export function createConnectPlaidAction(deps?: {
             connectionId: result.connectionId,
             database: context.cloudflare.env.DB,
             environment,
+            providerTokenEncryptionKey,
             secret,
           });
         }
@@ -346,8 +367,10 @@ function buildLoaderErrorData(title: string, message: string) {
 
 export function createConnectPlaidLoader(deps?: {
   createPlaidLinkToken?: CreatePlaidLinkTokenFn;
+  requireViewerContext?: typeof requireViewerContext;
 }) {
   const createLinkToken = deps?.createPlaidLinkToken ?? createPlaidLinkToken;
+  const requireViewer = deps?.requireViewerContext ?? requireViewerContext;
 
   return async function loader({
     context,
@@ -356,36 +379,38 @@ export function createConnectPlaidLoader(deps?: {
     context: { cloudflare: { env: Env } };
     request: Request;
   }): Promise<LoaderData> {
-    const clientId = readOptionalEnvString(
-      context.cloudflare.env,
-      "PLAID_CLIENT_ID",
+    const viewer = await requireViewer({ context, request });
+    const env = readCloudflareEnv(context);
+    const clientId = readOptionalEnvString(env, "PLAID_CLIENT_ID");
+    const secret = readOptionalEnvString(env, "PLAID_SECRET");
+    const providerTokenEncryptionKey = readOptionalEnvString(
+      env,
+      "PROVIDER_TOKEN_ENCRYPTION_KEY",
     );
-    const secret = readOptionalEnvString(
-      context.cloudflare.env,
-      "PLAID_SECRET",
-    );
-    const environment = readOptionalEnvString(
-      context.cloudflare.env,
-      "PLAID_ENV",
-    ) as "development" | "production" | "sandbox" | undefined;
+    const environment = readOptionalEnvString(env, "PLAID_ENV") as
+      | "development"
+      | "production"
+      | "sandbox"
+      | undefined;
     const configuredRedirectUrl = readOptionalEnvString(
-      context.cloudflare.env,
+      env,
       "PLAID_REDIRECT_URI",
     );
 
-    if (!clientId || !secret) {
+    if (!clientId || !secret || !providerTokenEncryptionKey) {
       return buildLoaderErrorData(
         "Plaid is not configured",
-        "Set PLAID_CLIENT_ID and PLAID_SECRET before launching Plaid Link.",
+        "Set PLAID_CLIENT_ID, PLAID_SECRET, and PROVIDER_TOKEN_ENCRYPTION_KEY before launching Plaid Link.",
       );
     }
 
     try {
+      const householdId = resolveViewerHouseholdId(request, viewer.householdId);
       const result = await createLinkToken({
         clientId,
-        database: context.cloudflare.env.DB,
+        database: env.DB,
         environment,
-        householdId: readRequestedHouseholdId(request) ?? undefined,
+        householdId,
         redirectUrl: buildPlaidRedirectUrl({
           configuredRedirectUrl,
           requestUrl: request.url,

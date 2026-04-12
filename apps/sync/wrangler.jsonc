@@ -10,6 +10,7 @@
   "observability": {
     "enabled": true
   },
+  "upload_source_maps": true,
   "triggers": {
     "crons": ["0 13 * * *"]
   },
@@ -28,7 +29,42 @@
       "service": "vista-state"
     }
   ],
-  "compatibility_flags": ["nodejs_compat"]
+  "compatibility_flags": ["nodejs_compat"],
+  "env": {
+    "prod": {
+      "name": "vista-sync-prod",
+      "workers_dev": false,
+      "observability": {
+        "enabled": true
+      },
+      "upload_source_maps": true,
+      "services": [
+        {
+          "binding": "STATE_SERVICE",
+          "service": "vista-state"
+        }
+      ],
+      "vars": {
+        "PLAID_ENV": "production"
+      },
+      "secrets": {
+        "required": [
+          "PLAID_CLIENT_ID",
+          "PLAID_SECRET",
+          "PROVIDER_TOKEN_ENCRYPTION_KEY"
+        ]
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "vista-prod",
+          "database_id": "__VISTA_PROD_D1_DATABASE_ID__",
+          "migrations_dir": "../../packages/db/migrations",
+          "preview_database_id": "__VISTA_PROD_PREVIEW_D1_DATABASE_ID__"
+        }
+      ]
+    }
+  }
   /**
    * Smart Placement
    * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

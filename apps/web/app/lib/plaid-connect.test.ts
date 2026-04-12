@@ -8,6 +8,8 @@ import {
   exchangePlaidPublicToken,
 } from "./plaid-connect";
 
+const TEST_ENCRYPTION_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
+
 class FakeD1PreparedStatement {
   constructor(
     private readonly database: Database,
@@ -80,8 +82,18 @@ function createWebTestDatabase() {
 
 describe("exchangePlaidPublicToken", () => {
   test("creates a link token with max-history Plaid products", async () => {
-    const { d1 } = createWebTestDatabase();
+    const { d1, sqlite } = createWebTestDatabase();
     const createLinkTokenCalls: Array<Record<string, unknown>> = [];
+    const now = new Date("2026-03-26T21:00:00.000Z");
+
+    sqlite
+      .query(
+        `
+          insert into households (id, name, last_synced_at, created_at)
+          values (?, ?, ?, ?)
+        `,
+      )
+      .run("household_viewer", "My Household", now.getTime(), now.getTime());
 
     const result = await createPlaidLinkToken({
       createHouseholdId: () => "household_generated",
@@ -105,12 +117,13 @@ describe("exchangePlaidPublicToken", () => {
         },
       },
       database: d1,
-      now: new Date("2026-03-26T21:00:00.000Z"),
+      householdId: "household_viewer",
+      now,
     });
 
     expect(result).toEqual({
-      householdId: "household_generated",
-      householdWasCreated: true,
+      householdId: "household_viewer",
+      householdWasCreated: false,
       linkToken: "link-sandbox-456",
     });
     expect(createLinkTokenCalls).toEqual([
@@ -119,8 +132,8 @@ describe("exchangePlaidPublicToken", () => {
         products: ["investments"],
         requiredIfSupportedProducts: ["transactions", "liabilities"],
         redirectUri: undefined,
-        userId: "household_generated",
         transactionsDaysRequested: 730,
+        userId: "household_viewer",
       },
     ]);
   });
@@ -170,8 +183,18 @@ describe("exchangePlaidPublicToken", () => {
     );
   });
 
-  test("exchanges the public token, creates a household, and stores the Plaid connection", async () => {
+  test("exchanges the public token for the authenticated household and stores the Plaid connection", async () => {
     const { d1, sqlite } = createWebTestDatabase();
+    const now = new Date("2026-03-26T21:00:00.000Z");
+
+    sqlite
+      .query(
+        `
+          insert into households (id, name, last_synced_at, created_at)
+          values (?, ?, ?, ?)
+        `,
+      )
+      .run("household_viewer", "My Household", now.getTime(), now.getTime());
 
     const result = await exchangePlaidPublicToken({
       createHouseholdId: () => "household_generated",
@@ -191,16 +214,18 @@ describe("exchangePlaidPublicToken", () => {
         },
       },
       database: d1,
+      householdId: "household_viewer",
       institutionId: "ins_109508",
       institutionName: "Vanguard",
-      now: new Date("2026-03-26T21:00:00.000Z"),
+      now,
+      providerTokenEncryptionKey: TEST_ENCRYPTION_KEY,
       publicToken: "public-sandbox-123",
     });
 
     expect(result).toEqual({
       connectionId: "conn:plaid:item-sandbox-123",
-      householdId: "household_generated",
-      householdWasCreated: true,
+      householdId: "household_viewer",
+      householdWasCreated: false,
     });
     expect(
       sqlite
@@ -210,6 +235,8 @@ describe("exchangePlaidPublicToken", () => {
               provider,
               external_connection_id as externalConnectionId,
               access_token as accessToken,
+              access_token_encrypted as accessTokenEncrypted,
+              credential_key_version as credentialKeyVersion,
               institution_id as institutionId,
               institution_name as institutionName,
               plaid_item_id as plaidItemId,
@@ -219,7 +246,9 @@ describe("exchangePlaidPublicToken", () => {
         )
         .get(),
     ).toEqual({
-      accessToken: "access-sandbox-123",
+      accessToken: null,
+      accessTokenEncrypted: expect.stringMatching(/^v1\.[^.]+\.[^.]+$/),
+      credentialKeyVersion: 1,
       externalConnectionId: "item-sandbox-123",
       institutionId: "ins_109508",
       institutionName: "Vanguard",

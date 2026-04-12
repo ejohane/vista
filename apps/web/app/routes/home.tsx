@@ -8,6 +8,7 @@ import {
   createD1HouseholdAccess,
   createD1HouseholdService,
   getDb,
+  type getHomepageSnapshot,
   type HouseholdAccess,
   type HouseholdService,
   type NetWorthHistoryPoint,
@@ -30,6 +31,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
+import { requireViewerContext } from "@/lib/auth";
 import {
   formatCompactUsd,
   formatSignedUsd,
@@ -39,8 +41,10 @@ import {
 import {
   buildHouseholdPath,
   readRequestedHouseholdId,
+  resolveViewerHouseholdId,
 } from "@/lib/household-routing";
 import { createWebRuntimeHouseholdService } from "@/lib/runtime-household-service";
+import { readCloudflareEnv } from "@/lib/server-context";
 import { cn } from "@/lib/utils";
 import type { Route } from "./+types/home";
 
@@ -49,6 +53,12 @@ type HomeLoaderDeps = {
   createHouseholdService?: (
     db: ReturnType<typeof getDb>,
   ) => Pick<HouseholdService, "getHomepageSnapshot">;
+  getHomepageSnapshot?: typeof getHomepageSnapshot;
+  loadHomepageSnapshot?: (args: {
+    env: Env;
+    householdId: string;
+  }) => Promise<Awaited<ReturnType<typeof getHomepageSnapshot>>>;
+  requireViewerContext?: typeof requireViewerContext;
   resolveHouseholdSelection?: typeof resolveHouseholdSelection;
 };
 
@@ -304,32 +314,91 @@ function buildLoaderErrorData(title: string, message: string) {
 }
 
 export function createHomeLoader(deps: HomeLoaderDeps = {}) {
+  const requireViewer = deps.requireViewerContext ?? requireViewerContext;
   const createHouseholdAccess =
     deps.createHouseholdAccess ?? createD1HouseholdAccess;
   const createHouseholdService =
     deps.createHouseholdService ?? createD1HouseholdService;
+  const loadHomepageSnapshot =
+    deps.loadHomepageSnapshot ??
+    (deps.getHomepageSnapshot
+      ? ({ env, householdId }: { env: Env; householdId: string }) => {
+          const getHomepageSnapshot = deps.getHomepageSnapshot;
+
+          if (!getHomepageSnapshot) {
+            throw new Error("Homepage snapshot loader is not configured.");
+          }
+
+          return getHomepageSnapshot(getDb(env.DB), householdId);
+        }
+      : ({ env, householdId }: { env: Env; householdId: string }) =>
+          createWebRuntimeHouseholdService(env).getHomepageSnapshot(
+            householdId,
+          ));
   const resolveSelectedHousehold =
     deps.resolveHouseholdSelection ?? resolveHouseholdSelection;
 
   return async function loader({ context, request }: Route.LoaderArgs) {
-    const db = getDb(context.cloudflare.env.DB);
+    const env = readCloudflareEnv(context);
 
     try {
-      const household = await resolveSelectedHousehold(
-        createHouseholdAccess(db),
-        readRequestedHouseholdId(request),
-      );
+      if (
+        deps.createHouseholdAccess ||
+        deps.createHouseholdService ||
+        deps.resolveHouseholdSelection
+      ) {
+        const db = getDb(env.DB);
+        const household = await resolveSelectedHousehold(
+          createHouseholdAccess(db),
+          readRequestedHouseholdId(request),
+        );
 
-      if (!household) {
+        if (!household) {
+          return {
+            kind: "empty" as const,
+            nextStepCommand: "bun run db:seed:local",
+          };
+        }
+
+        const snapshot = await createHouseholdService(db).getHomepageSnapshot(
+          household.id,
+        );
+
+        if (!snapshot) {
+          return {
+            kind: "empty" as const,
+            nextStepCommand: "bun run db:seed:local",
+          };
+        }
+
         return {
-          kind: "empty" as const,
-          nextStepCommand: "bun run db:seed:local",
+          kind: "ready" as const,
+          changeSummary: snapshot.changeSummary,
+          connectionStates: snapshot.connectionStates
+            .filter((state) => isSupportedProvider(state.provider))
+            .map((state) => ({
+              ...state,
+              lastSuccessfulSyncAt:
+                state.lastSuccessfulSyncAt?.toISOString() ?? null,
+              latestRunAt: state.latestRunAt?.toISOString() ?? null,
+            })),
+          hasSuccessfulSync: snapshot.hasSuccessfulSync,
+          history: snapshot.history,
+          historyCoverageMode: snapshot.historyCoverageMode ?? null,
+          historyHasEstimatedPoints:
+            snapshot.historyHasEstimatedPoints ?? false,
+          historyMode: snapshot.historyMode ?? "snapshot",
+          householdId: household.id,
+          householdName: snapshot.householdName,
+          lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
+          reportingGroups: snapshot.reportingGroups,
+          totals: snapshot.totals,
         };
       }
 
-      const snapshot = await createHouseholdService(db).getHomepageSnapshot(
-        household.id,
-      );
+      const viewer = await requireViewer({ context, request });
+      const householdId = resolveViewerHouseholdId(request, viewer.householdId);
+      const snapshot = await loadHomepageSnapshot({ env, householdId });
 
       if (!snapshot) {
         return {
@@ -351,10 +420,10 @@ export function createHomeLoader(deps: HomeLoaderDeps = {}) {
           })),
         hasSuccessfulSync: snapshot.hasSuccessfulSync,
         history: snapshot.history,
-        historyCoverageMode: snapshot.historyCoverageMode,
-        historyHasEstimatedPoints: snapshot.historyHasEstimatedPoints,
-        historyMode: snapshot.historyMode,
-        householdId: household.id,
+        historyCoverageMode: snapshot.historyCoverageMode ?? null,
+        historyHasEstimatedPoints: snapshot.historyHasEstimatedPoints ?? false,
+        historyMode: snapshot.historyMode ?? "snapshot",
+        householdId,
         householdName: snapshot.householdName,
         lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
         reportingGroups: snapshot.reportingGroups,
@@ -371,12 +440,7 @@ export function createHomeLoader(deps: HomeLoaderDeps = {}) {
   };
 }
 
-export async function loader(args: Route.LoaderArgs) {
-  return createHomeLoader({
-    createHouseholdService: () =>
-      createWebRuntimeHouseholdService(args.context.cloudflare.env),
-  })(args);
-}
+export const loader = createHomeLoader();
 
 // ── Page ───────────────────────────────────────────────────
 

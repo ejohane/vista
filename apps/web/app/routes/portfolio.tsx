@@ -3,6 +3,7 @@ import {
   createD1HouseholdAccess,
   createD1HouseholdService,
   getDb,
+  type getPortfolioSnapshot,
   type HouseholdAccess,
   type HouseholdService,
   resolveHouseholdSelection,
@@ -19,6 +20,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { requireViewerContext } from "@/lib/auth";
 import {
   formatCompactUsd,
   formatSignedUsd,
@@ -28,8 +30,10 @@ import {
 import {
   buildHouseholdPath,
   readRequestedHouseholdId,
+  resolveViewerHouseholdId,
 } from "@/lib/household-routing";
 import { createWebRuntimeHouseholdService } from "@/lib/runtime-household-service";
+import { readCloudflareEnv } from "@/lib/server-context";
 import { cn } from "@/lib/utils";
 import type { Route } from "./+types/portfolio";
 
@@ -38,6 +42,12 @@ type PortfolioLoaderDeps = {
   createHouseholdService?: (
     db: ReturnType<typeof getDb>,
   ) => Pick<HouseholdService, "getPortfolioSnapshot">;
+  getPortfolioSnapshot?: typeof getPortfolioSnapshot;
+  loadPortfolioSnapshot?: (args: {
+    env: Env;
+    householdId: string;
+  }) => Promise<Awaited<ReturnType<typeof getPortfolioSnapshot>>>;
+  requireViewerContext?: typeof requireViewerContext;
   resolveHouseholdSelection?: typeof resolveHouseholdSelection;
 };
 
@@ -208,39 +218,83 @@ function buildLoaderErrorData(title: string, message: string) {
 }
 
 export function createPortfolioLoader(deps: PortfolioLoaderDeps = {}) {
+  const requireViewer = deps.requireViewerContext ?? requireViewerContext;
   const createHouseholdAccess =
     deps.createHouseholdAccess ?? createD1HouseholdAccess;
   const createHouseholdService =
     deps.createHouseholdService ?? createD1HouseholdService;
+  const loadPortfolioSnapshot =
+    deps.loadPortfolioSnapshot ??
+    (deps.getPortfolioSnapshot
+      ? ({ env, householdId }: { env: Env; householdId: string }) => {
+          const getPortfolioSnapshot = deps.getPortfolioSnapshot;
+
+          if (!getPortfolioSnapshot) {
+            throw new Error("Portfolio snapshot loader is not configured.");
+          }
+
+          return getPortfolioSnapshot(getDb(env.DB), householdId);
+        }
+      : ({ env, householdId }: { env: Env; householdId: string }) =>
+          createWebRuntimeHouseholdService(env).getPortfolioSnapshot(
+            householdId,
+          ));
   const resolveSelectedHousehold =
     deps.resolveHouseholdSelection ?? resolveHouseholdSelection;
 
   return async function loader({ context, request }: Route.LoaderArgs) {
-    const db = getDb(context.cloudflare.env.DB);
+    const env = readCloudflareEnv(context);
 
     try {
-      const household = await resolveSelectedHousehold(
-        createHouseholdAccess(db),
-        readRequestedHouseholdId(request),
-      );
+      if (
+        deps.createHouseholdAccess ||
+        deps.createHouseholdService ||
+        deps.resolveHouseholdSelection
+      ) {
+        const db = getDb(env.DB);
+        const household = await resolveSelectedHousehold(
+          createHouseholdAccess(db),
+          readRequestedHouseholdId(request),
+        );
 
-      if (!household) {
-        return { kind: "empty" as const };
+        if (!household) {
+          return { kind: "empty" as const };
+        }
+
+        const snapshot = await createHouseholdService(db).getPortfolioSnapshot(
+          household.id,
+        );
+
+        if (!snapshot) {
+          return { householdId: household.id, kind: "empty" as const };
+        }
+
+        return {
+          accounts: snapshot.accounts,
+          allocationBuckets: snapshot.allocationBuckets,
+          asOfDate: snapshot.asOfDate,
+          householdId: household.id,
+          householdName: snapshot.householdName,
+          kind: "ready" as const,
+          lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
+          topHoldings: snapshot.topHoldings,
+          totals: snapshot.totals,
+        };
       }
 
-      const snapshot = await createHouseholdService(db).getPortfolioSnapshot(
-        household.id,
-      );
+      const viewer = await requireViewer({ context, request });
+      const householdId = resolveViewerHouseholdId(request, viewer.householdId);
+      const snapshot = await loadPortfolioSnapshot({ env, householdId });
 
       if (!snapshot) {
-        return { householdId: household.id, kind: "empty" as const };
+        return { householdId, kind: "empty" as const };
       }
 
       return {
         accounts: snapshot.accounts,
         allocationBuckets: snapshot.allocationBuckets,
         asOfDate: snapshot.asOfDate,
-        householdId: household.id,
+        householdId,
         householdName: snapshot.householdName,
         kind: "ready" as const,
         lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
@@ -258,12 +312,7 @@ export function createPortfolioLoader(deps: PortfolioLoaderDeps = {}) {
   };
 }
 
-export async function loader(args: Route.LoaderArgs) {
-  return createPortfolioLoader({
-    createHouseholdService: () =>
-      createWebRuntimeHouseholdService(args.context.cloudflare.env),
-  })(args);
-}
+export const loader = createPortfolioLoader();
 
 // ── Page ───────────────────────────────────────────────────
 

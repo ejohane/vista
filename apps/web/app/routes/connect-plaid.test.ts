@@ -10,12 +10,20 @@ describe("connect plaid route loader", () => {
     const createLinkTokenMock = mock(async () => {
       return {
         householdId: "household_demo",
-        householdWasCreated: true,
+        householdWasCreated: false,
         linkToken: "link-sandbox-101",
       };
     });
+    const requireViewerContextMock = mock(async () => ({
+      clerkUserId: "user_123",
+      householdId: "household_demo",
+      householdName: "My Household",
+      memberId: "member_viewer",
+      memberRole: "owner" as const,
+    }));
     const loader = createConnectPlaidLoader({
       createPlaidLinkToken: createLinkTokenMock,
+      requireViewerContext: requireViewerContextMock,
     });
 
     const result = await loader({
@@ -26,6 +34,8 @@ describe("connect plaid route loader", () => {
             PLAID_CLIENT_ID: "client-demo",
             PLAID_ENV: "sandbox",
             PLAID_SECRET: "secret-demo",
+            PROVIDER_TOKEN_ENCRYPTION_KEY:
+              "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
           },
         },
       },
@@ -54,12 +64,20 @@ describe("connect plaid route loader", () => {
     const createLinkTokenMock = mock(async () => {
       return {
         householdId: "household_demo",
-        householdWasCreated: true,
+        householdWasCreated: false,
         linkToken: "link-sandbox-102",
       };
     });
+    const requireViewerContextMock = mock(async () => ({
+      clerkUserId: "user_123",
+      householdId: "household_demo",
+      householdName: "My Household",
+      memberId: "member_viewer",
+      memberRole: "owner" as const,
+    }));
     const loader = createConnectPlaidLoader({
       createPlaidLinkToken: createLinkTokenMock,
+      requireViewerContext: requireViewerContextMock,
     });
 
     const result = await loader({
@@ -70,6 +88,8 @@ describe("connect plaid route loader", () => {
             PLAID_CLIENT_ID: "client-demo",
             PLAID_ENV: "production",
             PLAID_SECRET: "secret-demo",
+            PROVIDER_TOKEN_ENCRYPTION_KEY:
+              "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
           },
         },
       },
@@ -96,6 +116,13 @@ describe("connect plaid route loader", () => {
       createPlaidLinkToken: mock(async () => {
         throw new Error("createPlaidLinkToken should not be called");
       }),
+      requireViewerContext: mock(async () => ({
+        clerkUserId: "user_123",
+        householdId: "household_viewer",
+        householdName: "My Household",
+        memberId: "member_viewer",
+        memberRole: "owner" as const,
+      })),
     });
 
     const result = await loader({
@@ -112,8 +139,44 @@ describe("connect plaid route loader", () => {
     expect(result).toEqual({
       kind: "error",
       message:
-        "Set PLAID_CLIENT_ID and PLAID_SECRET before launching Plaid Link.",
+        "Set PLAID_CLIENT_ID, PLAID_SECRET, and PROVIDER_TOKEN_ENCRYPTION_KEY before launching Plaid Link.",
       title: "Plaid is not configured",
+    });
+  });
+
+  test("redirects anonymous users before preparing Plaid Link", async () => {
+    const loader = createConnectPlaidLoader({
+      createPlaidLinkToken: mock(async () => {
+        throw new Error("createPlaidLinkToken should not be called");
+      }),
+      requireViewerContext: mock(async () => {
+        throw new Response(null, {
+          headers: {
+            Location: "/sign-in?redirect_url=%2Fconnect%2Fplaid",
+          },
+          status: 302,
+        });
+      }),
+    });
+
+    await expect(
+      loader({
+        context: {
+          cloudflare: {
+            env: {
+              DB: {} as D1Database,
+              PLAID_CLIENT_ID: "client-demo",
+              PLAID_ENV: "sandbox",
+              PLAID_SECRET: "secret-demo",
+              PROVIDER_TOKEN_ENCRYPTION_KEY:
+                "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+            },
+          },
+        },
+        request: new Request("http://localhost/connect/plaid"),
+      } as never),
+    ).rejects.toMatchObject({
+      status: 302,
     });
   });
 });
@@ -124,7 +187,7 @@ describe("connect plaid route action", () => {
       return {
         connectionId: "conn:plaid:item-demo-101",
         householdId: "household_demo",
-        householdWasCreated: true,
+        householdWasCreated: false,
       };
     });
     const syncMock = mock(async () => {
@@ -136,6 +199,13 @@ describe("connect plaid route action", () => {
     });
     const action = createConnectPlaidAction({
       exchangePlaidPublicToken: exchangeMock,
+      requireViewerContext: mock(async () => ({
+        clerkUserId: "user_123",
+        householdId: "household_demo",
+        householdName: "My Household",
+        memberId: "member_viewer",
+        memberRole: "owner" as const,
+      })),
       syncPlaidConnection: syncMock,
     });
     const formData = new FormData();
@@ -152,6 +222,8 @@ describe("connect plaid route action", () => {
             PLAID_CLIENT_ID: "client-demo",
             PLAID_ENV: "sandbox",
             PLAID_SECRET: "secret-demo",
+            PROVIDER_TOKEN_ENCRYPTION_KEY:
+              "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
           },
         },
       },
@@ -177,6 +249,8 @@ describe("connect plaid route action", () => {
         institutionId: "ins_109508",
         institutionName: "Vanguard",
         publicToken: "public-sandbox-101",
+        providerTokenEncryptionKey:
+          "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
         secret: "secret-demo",
       }),
     );
@@ -186,6 +260,8 @@ describe("connect plaid route action", () => {
         connectionId: "conn:plaid:item-demo-101",
         database: {} as D1Database,
         environment: "sandbox",
+        providerTokenEncryptionKey:
+          "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
         secret: "secret-demo",
       }),
     );
@@ -196,6 +272,13 @@ describe("connect plaid route action", () => {
       exchangePlaidPublicToken: mock(async () => {
         throw new Error("exchangePlaidPublicToken should not be called");
       }),
+      requireViewerContext: mock(async () => ({
+        clerkUserId: "user_123",
+        householdId: "household_viewer",
+        householdName: "My Household",
+        memberId: "member_viewer",
+        memberRole: "owner" as const,
+      })),
       syncPlaidConnection: mock(async () => {
         throw new Error("syncPlaidConnection should not be called");
       }),
@@ -215,8 +298,49 @@ describe("connect plaid route action", () => {
 
     expect(result).toEqual({
       message:
-        "Set PLAID_CLIENT_ID and PLAID_SECRET before starting Plaid onboarding.",
+        "Set PLAID_CLIENT_ID, PLAID_SECRET, and PROVIDER_TOKEN_ENCRYPTION_KEY before starting Plaid onboarding.",
       ok: false,
+    });
+  });
+
+  test("redirects anonymous users before exchanging Plaid tokens", async () => {
+    const action = createConnectPlaidAction({
+      exchangePlaidPublicToken: mock(async () => {
+        throw new Error("exchangePlaidPublicToken should not be called");
+      }),
+      requireViewerContext: mock(async () => {
+        throw new Response(null, {
+          headers: {
+            Location: "/sign-in?redirect_url=%2Fconnect%2Fplaid",
+          },
+          status: 302,
+        });
+      }),
+      syncPlaidConnection: mock(async () => {
+        throw new Error("syncPlaidConnection should not be called");
+      }),
+    });
+
+    await expect(
+      action({
+        context: {
+          cloudflare: {
+            env: {
+              DB: {} as D1Database,
+              PLAID_CLIENT_ID: "client-demo",
+              PLAID_ENV: "sandbox",
+              PLAID_SECRET: "secret-demo",
+              PROVIDER_TOKEN_ENCRYPTION_KEY:
+                "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+            },
+          },
+        },
+        request: new Request("http://localhost/connect/plaid", {
+          method: "POST",
+        }),
+      } as never),
+    ).rejects.toMatchObject({
+      status: 302,
     });
   });
 });

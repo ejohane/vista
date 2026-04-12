@@ -6,6 +6,7 @@ export * from "./historical-net-worth";
 export * from "./household-export";
 export * from "./household-service";
 export * from "./households";
+export * from "./identity";
 export * from "./portfolio";
 export * from "./queries";
 export * from "./schema";

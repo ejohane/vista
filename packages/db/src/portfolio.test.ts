@@ -397,4 +397,12 @@ describe("getPortfolioSnapshot", () => {
       },
     ]);
   });
+
+  test("returns null when no household id is provided", async () => {
+    const db = createPortfolioTestDb();
+
+    await expect(getPortfolioSnapshot(db, undefined as never)).rejects.toThrow(
+      "Household id is required.",
+    );
+  });
 });

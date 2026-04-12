@@ -815,6 +815,14 @@ describe("getDashboardSnapshot", () => {
 
     await expect(getDashboardSnapshot(db, "missing")).resolves.toBeNull();
   });
+
+  test("throws when the household id is omitted", async () => {
+    const { db } = createTestDb();
+
+    await expect(getDashboardSnapshot(db, undefined as never)).rejects.toThrow(
+      "Household id is required.",
+    );
+  });
 });
 
 describe("getHomepageSnapshot", () => {

@@ -8,11 +8,13 @@ import {
   type AccountCurationSnapshot,
   createD1HouseholdAccess,
   createD1HouseholdService,
+  type getAccountCurationSnapshot,
   getDb,
   type HouseholdAccess,
   type HouseholdService,
   ownershipTypes,
   resolveHouseholdSelection,
+  type updateAccountCuration,
 } from "@vista/db";
 import { useDeferredValue, useState } from "react";
 import { redirect, useFetcher } from "react-router";
@@ -21,12 +23,15 @@ import { DashboardShell } from "@/components/dashboard-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { requireViewerContext } from "@/lib/auth";
 import { formatCompactUsd, formatUpdatedAt, formatUsd } from "@/lib/format";
 import {
   buildHouseholdPath,
   readRequestedHouseholdId,
+  resolveViewerHouseholdId,
 } from "@/lib/household-routing";
 import { createWebRuntimeHouseholdService } from "@/lib/runtime-household-service";
+import { readCloudflareEnv } from "@/lib/server-context";
 import { cn } from "@/lib/utils";
 import type { Route } from "./+types/account-review";
 
@@ -38,6 +43,17 @@ type AccountReviewRouteDeps = {
     HouseholdService,
     "getAccountCurationSnapshot" | "updateAccountCuration"
   >;
+  getAccountCurationSnapshot?: typeof getAccountCurationSnapshot;
+  loadAccountCurationSnapshot?: (args: {
+    env: Env;
+    householdId: string;
+  }) => Promise<Awaited<ReturnType<typeof getAccountCurationSnapshot>>>;
+  requireViewerContext?: typeof requireViewerContext;
+  saveAccountCuration?: (args: {
+    env: Env;
+    update: Parameters<typeof updateAccountCuration>[1];
+  }) => Promise<unknown>;
+  updateAccountCuration?: typeof updateAccountCuration;
   resolveHouseholdSelection?: typeof resolveHouseholdSelection;
 };
 
@@ -453,34 +469,84 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export function createAccountReviewLoader(deps: AccountReviewRouteDeps = {}) {
+  const requireViewer = deps.requireViewerContext ?? requireViewerContext;
   const createHouseholdAccess =
     deps.createHouseholdAccess ?? createD1HouseholdAccess;
   const createHouseholdService =
     deps.createHouseholdService ?? createD1HouseholdService;
+  const loadAccountCurationSnapshot =
+    deps.loadAccountCurationSnapshot ??
+    (deps.getAccountCurationSnapshot
+      ? ({ env, householdId }: { env: Env; householdId: string }) => {
+          const getAccountCurationSnapshot = deps.getAccountCurationSnapshot;
+
+          if (!getAccountCurationSnapshot) {
+            throw new Error("Account curation loader is not configured.");
+          }
+
+          return getAccountCurationSnapshot(getDb(env.DB), householdId);
+        }
+      : ({ env, householdId }: { env: Env; householdId: string }) =>
+          createWebRuntimeHouseholdService(env).getAccountCurationSnapshot(
+            householdId,
+          ));
   const resolveSelectedHousehold =
     deps.resolveHouseholdSelection ?? resolveHouseholdSelection;
 
   return async function loader({ context, request }: Route.LoaderArgs) {
     const updatedAccountId = new URL(request.url).searchParams.get("updated");
-    const db = getDb(context.cloudflare.env.DB);
+    const env = readCloudflareEnv(context);
 
     try {
-      const household = await resolveSelectedHousehold(
-        createHouseholdAccess(db),
-        readRequestedHouseholdId(request),
-      );
+      if (
+        deps.createHouseholdAccess ||
+        deps.createHouseholdService ||
+        deps.resolveHouseholdSelection
+      ) {
+        const db = getDb(env.DB);
+        const household = await resolveSelectedHousehold(
+          createHouseholdAccess(db),
+          readRequestedHouseholdId(request),
+        );
 
-      if (!household) {
-        return { householdId: null, kind: "empty" as const, updatedAccountId };
+        if (!household) {
+          return {
+            householdId: null,
+            kind: "empty" as const,
+            updatedAccountId,
+          };
+        }
+
+        const snapshot = await createHouseholdService(
+          db,
+        ).getAccountCurationSnapshot(household.id);
+
+        if (!snapshot) {
+          return {
+            householdId: household.id,
+            kind: "empty" as const,
+            updatedAccountId,
+          };
+        }
+
+        return {
+          accounts: snapshot.accounts,
+          householdId: household.id,
+          householdName: snapshot.householdName,
+          kind: "ready" as const,
+          lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
+          summary: snapshot.summary,
+          updatedAccountId,
+        };
       }
 
-      const snapshot = await createHouseholdService(
-        db,
-      ).getAccountCurationSnapshot(household.id);
+      const viewer = await requireViewer({ context, request });
+      const householdId = resolveViewerHouseholdId(request, viewer.householdId);
+      const snapshot = await loadAccountCurationSnapshot({ env, householdId });
 
       if (!snapshot) {
         return {
-          householdId: household.id,
+          householdId,
           kind: "empty" as const,
           updatedAccountId,
         };
@@ -488,7 +554,7 @@ export function createAccountReviewLoader(deps: AccountReviewRouteDeps = {}) {
 
       return {
         accounts: snapshot.accounts,
-        householdId: household.id,
+        householdId,
         householdName: snapshot.householdName,
         kind: "ready" as const,
         lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
@@ -508,18 +574,38 @@ export function createAccountReviewLoader(deps: AccountReviewRouteDeps = {}) {
   };
 }
 
-export async function loader(args: Route.LoaderArgs) {
-  return createAccountReviewLoader({
-    createHouseholdService: () =>
-      createWebRuntimeHouseholdService(args.context.cloudflare.env),
-  })(args);
-}
-
 export function createAccountReviewAction(deps: AccountReviewRouteDeps = {}) {
+  const requireViewer = deps.requireViewerContext ?? requireViewerContext;
   const createHouseholdAccess =
     deps.createHouseholdAccess ?? createD1HouseholdAccess;
   const createHouseholdService =
     deps.createHouseholdService ?? createD1HouseholdService;
+  const saveAccountCuration =
+    deps.saveAccountCuration ??
+    (deps.updateAccountCuration
+      ? ({
+          env,
+          update,
+        }: {
+          env: Env;
+          update: Parameters<typeof updateAccountCuration>[1];
+        }) => {
+          const updateAccountCuration = deps.updateAccountCuration;
+
+          if (!updateAccountCuration) {
+            throw new Error("Account curation updater is not configured.");
+          }
+
+          return updateAccountCuration(getDb(env.DB), update);
+        }
+      : ({
+          env,
+          update,
+        }: {
+          env: Env;
+          update: Parameters<typeof updateAccountCuration>[1];
+        }) =>
+          createWebRuntimeHouseholdService(env).updateAccountCuration(update));
   const resolveSelectedHousehold =
     deps.resolveHouseholdSelection ?? resolveHouseholdSelection;
 
@@ -548,26 +634,61 @@ export function createAccountReviewAction(deps: AccountReviewRouteDeps = {}) {
       } satisfies ActionData;
     }
 
-    const db = getDb(context.cloudflare.env.DB);
-
     try {
-      const household = await resolveSelectedHousehold(
-        createHouseholdAccess(db),
-        readRequestedHouseholdId(request),
-      );
+      const env = readCloudflareEnv(context);
 
-      if (!household) {
-        throw new Error("No household is available for account curation.");
+      if (
+        deps.createHouseholdAccess ||
+        deps.createHouseholdService ||
+        deps.resolveHouseholdSelection
+      ) {
+        const db = getDb(env.DB);
+        const household = await resolveSelectedHousehold(
+          createHouseholdAccess(db),
+          readRequestedHouseholdId(request),
+        );
+
+        if (!household) {
+          throw new Error("No household is available for account curation.");
+        }
+
+        await createHouseholdService(db).updateAccountCuration({
+          accountId,
+          displayName: typeof displayName === "string" ? displayName : null,
+          householdId: household.id,
+          includeInHouseholdReporting:
+            formData.get("includeInHouseholdReporting") === "on",
+          isHidden: formData.get("isHidden") === "on",
+          ownershipType: ownershipType as OwnershipOption,
+        });
+
+        if (intent === "inline") {
+          return { accountId, ok: true as const };
+        }
+
+        const redirectUrl = new URL(
+          buildHouseholdPath("/accounts/review", household.id),
+          "http://localhost",
+        );
+        redirectUrl.searchParams.set("updated", accountId);
+
+        return redirect(`${redirectUrl.pathname}${redirectUrl.search}`);
       }
 
-      await createHouseholdService(db).updateAccountCuration({
-        accountId,
-        displayName: typeof displayName === "string" ? displayName : null,
-        householdId: household.id,
-        includeInHouseholdReporting:
-          formData.get("includeInHouseholdReporting") === "on",
-        isHidden: formData.get("isHidden") === "on",
-        ownershipType: ownershipType as OwnershipOption,
+      const viewer = await requireViewer({ context, request });
+      const householdId = resolveViewerHouseholdId(request, viewer.householdId);
+
+      await saveAccountCuration({
+        env,
+        update: {
+          accountId,
+          displayName: typeof displayName === "string" ? displayName : null,
+          householdId,
+          includeInHouseholdReporting:
+            formData.get("includeInHouseholdReporting") === "on",
+          isHidden: formData.get("isHidden") === "on",
+          ownershipType: ownershipType as OwnershipOption,
+        },
       });
 
       if (intent === "inline") {
@@ -575,7 +696,7 @@ export function createAccountReviewAction(deps: AccountReviewRouteDeps = {}) {
       }
 
       const redirectUrl = new URL(
-        buildHouseholdPath("/accounts/review", household.id),
+        buildHouseholdPath("/accounts/review", householdId),
         "http://localhost",
       );
       redirectUrl.searchParams.set("updated", accountId);
@@ -594,12 +715,8 @@ export function createAccountReviewAction(deps: AccountReviewRouteDeps = {}) {
   };
 }
 
-export async function action(args: Route.ActionArgs) {
-  return createAccountReviewAction({
-    createHouseholdService: () =>
-      createWebRuntimeHouseholdService(args.context.cloudflare.env),
-  })(args);
-}
+export const loader = createAccountReviewLoader();
+export const action = createAccountReviewAction();
 
 /* ------------------------------------------------------------------ */
 /*  Main screen                                                        */

@@ -68,6 +68,11 @@ export const holdingAssetClasses = [
 ] as const;
 export type HoldingAssetClass = (typeof holdingAssetClasses)[number];
 
+export const memberRoles = ["owner", "member"] as const;
+export type MemberRole = (typeof memberRoles)[number];
+
+export const authIdentityProviders = ["clerk"] as const;
+export type AuthIdentityProvider = (typeof authIdentityProviders)[number];
 export const transactionDirections = ["credit", "debit"] as const;
 export type TransactionDirection = (typeof transactionDirections)[number];
 
@@ -78,12 +83,65 @@ export const households = sqliteTable("households", {
   name: text("name").notNull(),
 });
 
+export const members = sqliteTable(
+  "members",
+  {
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    displayName: text("display_name"),
+    email: text("email"),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.id),
+    id: text("id").primaryKey(),
+    role: text("role", {
+      enum: memberRoles,
+    }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    check("members_role_check", sql`${table.role} in ('owner', 'member')`),
+    index("members_household_idx").on(table.householdId),
+  ],
+);
+
+export const userIdentities = sqliteTable(
+  "user_identities",
+  {
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    email: text("email"),
+    id: text("id").primaryKey(),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
+    memberId: text("member_id")
+      .notNull()
+      .references(() => members.id),
+    provider: text("provider", {
+      enum: authIdentityProviders,
+    }).notNull(),
+    providerUserId: text("provider_user_id").notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    check(
+      "user_identities_provider_check",
+      sql`${table.provider} in ('clerk')`,
+    ),
+    index("user_identities_member_idx").on(table.memberId),
+    uniqueIndex("user_identities_provider_user_idx").on(
+      table.provider,
+      table.providerUserId,
+    ),
+  ],
+);
+
 export const providerConnections = sqliteTable(
   "provider_connections",
   {
     accessToken: text("access_token"),
+    accessTokenEncrypted: text("access_token_encrypted"),
     accessSecret: text("access_secret"),
+    accessSecretEncrypted: text("access_secret_encrypted"),
     accessUrl: text("access_url"),
+    credentialKeyVersion: integer("credential_key_version").default(1),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     externalConnectionId: text("external_connection_id").notNull(),
     householdId: text("household_id")

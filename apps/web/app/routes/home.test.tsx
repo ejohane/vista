@@ -1,11 +1,78 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import Home from "./home";
+import Home, { createHomeLoader } from "./home";
 
 type HomeProps = Parameters<typeof Home>[0];
 
 describe("Home route", () => {
+  test("loads the homepage snapshot for the authenticated household", async () => {
+    const getHomepageSnapshotMock = mock(async () => ({
+      changeSummary: null,
+      connectionStates: [],
+      hasSuccessfulSync: false,
+      history: [],
+      historyCoverageMode: null,
+      historyHasEstimatedPoints: false,
+      historyMode: "snapshot" as const,
+      householdName: "My Household",
+      lastSyncedAt: new Date("2026-04-11T14:00:00.000Z"),
+      reportingGroups: [],
+      totals: {
+        cashMinor: 0,
+        investmentsMinor: 0,
+        netWorthMinor: 0,
+      },
+    }));
+    const requireViewerContextMock = mock(async () => ({
+      clerkUserId: "user_123",
+      householdId: "household_viewer",
+      householdName: "My Household",
+      memberId: "member_viewer",
+      memberRole: "owner" as const,
+    }));
+    const loader = createHomeLoader({
+      getHomepageSnapshot: getHomepageSnapshotMock,
+      requireViewerContext: requireViewerContextMock,
+    });
+
+    const result = await loader({
+      context: {
+        cloudflare: {
+          env: {
+            DB: {} as D1Database,
+          },
+        },
+      },
+      request: new Request("http://localhost/"),
+    } as never);
+
+    expect(requireViewerContextMock).toHaveBeenCalled();
+    expect(getHomepageSnapshotMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "household_viewer",
+    );
+    expect(result).toEqual({
+      changeSummary: null,
+      connectionStates: [],
+      hasSuccessfulSync: false,
+      history: [],
+      historyCoverageMode: null,
+      historyHasEstimatedPoints: false,
+      historyMode: "snapshot",
+      householdId: "household_viewer",
+      householdName: "My Household",
+      kind: "ready",
+      lastSyncedAt: "2026-04-11T14:00:00.000Z",
+      reportingGroups: [],
+      totals: {
+        cashMinor: 0,
+        investmentsMinor: 0,
+        netWorthMinor: 0,
+      },
+    });
+  });
+
   test("renders the redesigned product-first dashboard", () => {
     const props = {
       loaderData: {

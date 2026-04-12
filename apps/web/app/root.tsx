@@ -1,3 +1,5 @@
+import { ClerkProvider } from "@clerk/react-router";
+import { clerkMiddleware, rootAuthLoader } from "@clerk/react-router/server";
 import {
   isRouteErrorResponse,
   Links,
@@ -5,13 +7,22 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
+  useRouteLoaderData,
 } from "react-router";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Route } from "./+types/root";
 import "./app.css";
 
+export const middleware: Route.MiddlewareFunction[] = [clerkMiddleware()];
+
+export async function loader(args: Route.LoaderArgs) {
+  return rootAuthLoader(args);
+}
+
 export function Layout({ children }: { children: React.ReactNode }) {
+  const loaderData = useRouteLoaderData<typeof loader>("root");
+
   return (
     <html lang="en">
       <head>
@@ -21,7 +32,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Links />
       </head>
       <body className="bg-background text-foreground antialiased">
-        <TooltipProvider>{children}</TooltipProvider>
+        <ClerkProvider loaderData={loaderData}>
+          <TooltipProvider>{children}</TooltipProvider>
+        </ClerkProvider>
         <ScrollRestoration />
         <Scripts />
       </body>

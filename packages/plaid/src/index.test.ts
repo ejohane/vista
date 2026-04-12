@@ -2,8 +2,10 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-
 import { syncPlaidConnection } from "./index";
+import { encryptProviderToken } from "./provider-credentials";
+
+const TEST_ENCRYPTION_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
 
 class FakeD1PreparedStatement {
   constructor(
@@ -389,6 +391,10 @@ describe("syncPlaidConnection", () => {
   test("upserts provider accounts and canonical accounts across repeated syncs", async () => {
     const { d1, sqlite } = createPlaidTestDatabase();
     const createdAt = new Date("2026-03-27T23:00:00.000Z").getTime();
+    const encryptedToken = await encryptProviderToken({
+      plaintext: "access-demo-1",
+      secret: TEST_ENCRYPTION_KEY,
+    });
 
     sqlite
       .query(
@@ -408,12 +414,14 @@ describe("syncPlaidConnection", () => {
             status,
             external_connection_id,
             access_token,
+            access_token_encrypted,
+            credential_key_version,
             institution_name,
             plaid_item_id,
             created_at,
             updated_at
           )
-          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
@@ -422,7 +430,9 @@ describe("syncPlaidConnection", () => {
         "plaid",
         "active",
         "item-demo-1",
-        "access-demo-1",
+        null,
+        encryptedToken,
+        1,
         "Vanguard",
         "item-demo-1",
         createdAt,
@@ -499,12 +509,14 @@ describe("syncPlaidConnection", () => {
       connectionId: "conn:plaid:item-demo-1",
       database: d1,
       now: new Date("2026-03-27T23:10:00.000Z"),
+      providerTokenEncryptionKey: TEST_ENCRYPTION_KEY,
     });
     const secondResult = await syncPlaidConnection({
       client,
       connectionId: "conn:plaid:item-demo-1",
       database: d1,
       now: new Date("2026-03-27T23:20:00.000Z"),
+      providerTokenEncryptionKey: TEST_ENCRYPTION_KEY,
     });
 
     expect(firstResult.status).toBe("succeeded");

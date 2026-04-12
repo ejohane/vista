@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
+    "@clerk/react-router": "^3.0.12",
     "@fontsource-variable/figtree": "^5.2.10",
     "@phosphor-icons/react": "^2.1.10",
     "@vista/db": "workspace:*",
