@@ -79,7 +79,7 @@ function createWebTestDatabase() {
 }
 
 describe("exchangePlaidPublicToken", () => {
-  test("creates a link token with investment-only products", async () => {
+  test("creates a link token with max-history Plaid products", async () => {
     const { d1 } = createWebTestDatabase();
     const createLinkTokenCalls: Array<Record<string, unknown>> = [];
 
@@ -116,7 +116,9 @@ describe("exchangePlaidPublicToken", () => {
       {
         countryCodes: undefined,
         products: ["investments"],
+        requiredIfSupportedProducts: ["transactions", "liabilities"],
         redirectUri: undefined,
+        transactionsDaysRequested: 730,
         userId: "household_default",
       },
     ]);
