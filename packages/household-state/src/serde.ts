@@ -22,6 +22,10 @@ export function serializeHouseholdStateExport(snapshot: HouseholdStateExport) {
       ...balance,
       capturedAt: balance.capturedAt.toISOString(),
     })),
+    dailyNetWorthFacts: snapshot.dailyNetWorthFacts.map((fact) => ({
+      ...fact,
+      rebuiltAt: fact.rebuiltAt.toISOString(),
+    })),
     holdings: snapshot.holdings.map((holding) => ({
       ...holding,
       createdAt: holding.createdAt.toISOString(),
@@ -67,6 +71,10 @@ export function deserializeHouseholdStateExport(
     balanceSnapshots: value.balanceSnapshots.map((balance) => ({
       ...balance,
       capturedAt: new Date(balance.capturedAt),
+    })),
+    dailyNetWorthFacts: value.dailyNetWorthFacts.map((fact) => ({
+      ...fact,
+      rebuiltAt: new Date(fact.rebuiltAt),
     })),
     holdings: value.holdings.map((holding) => ({
       ...holding,

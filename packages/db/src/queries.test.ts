@@ -1014,23 +1014,141 @@ describe("getHomepageSnapshot", () => {
       {
         cashMinor: 4740000,
         completedAt: earlierBankCompletedAt.toISOString(),
+        coverageMode: "snapshot_only",
         investmentsMinor: 0,
+        isEstimated: false,
         liabilitiesMinor: 0,
         netWorthMinor: 4740000,
       },
       {
         cashMinor: 4740000,
         completedAt: investmentCompletedAt.toISOString(),
+        coverageMode: "snapshot_only",
         investmentsMinor: 40460000,
+        isEstimated: false,
         liabilitiesMinor: 0,
         netWorthMinor: 45200000,
       },
       {
         cashMinor: 4812100,
         completedAt: bankCompletedAt.toISOString(),
+        coverageMode: "snapshot_only",
         investmentsMinor: 40460000,
+        isEstimated: false,
         liabilitiesMinor: 0,
         netWorthMinor: 45272100,
+      },
+    ]);
+  });
+
+  test("prefers backfilled daily net-worth facts when at least two fact rows exist", async () => {
+    const { db, sqlite } = createTestDb();
+
+    insertProviderConnection(sqlite, {
+      accessToken: "plaid-access-token-primary",
+      connectionId: "conn_plaid_primary",
+      externalConnectionId: "plaid_primary",
+      provider: "plaid",
+      status: "active",
+    });
+
+    insertSucceededRun(sqlite, {
+      balances: {
+        acct_brokerage: 16450320,
+        acct_checking: 1284500,
+        acct_retirement: 24311890,
+        acct_savings: 3527600,
+      },
+      completedAt: secondCompletedAt,
+      provider: "plaid",
+      providerConnectionId: "conn_plaid_primary",
+      runId: "sync_seed_2026_03_16",
+      startedAt: new Date("2026-03-16T18:25:00.000Z"),
+    });
+
+    const insertDailyFact = sqlite.query(
+      `
+        insert into daily_net_worth_facts (
+          household_id,
+          fact_date,
+          cash_minor,
+          investments_minor,
+          liabilities_minor,
+          net_worth_minor,
+          coverage_mode,
+          is_estimated,
+          rebuilt_at
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    );
+
+    insertDailyFact.run(
+      "household_demo",
+      "2026-03-14",
+      0,
+      43120000,
+      0,
+      43120000,
+      "investments_backfilled",
+      0,
+      secondCompletedAt.getTime(),
+    );
+    insertDailyFact.run(
+      "household_demo",
+      "2026-03-15",
+      0,
+      43750000,
+      0,
+      43750000,
+      "investments_backfilled",
+      1,
+      secondCompletedAt.getTime(),
+    );
+    insertDailyFact.run(
+      "household_demo",
+      "2026-03-16",
+      0,
+      45574310,
+      0,
+      45574310,
+      "investments_backfilled",
+      0,
+      secondCompletedAt.getTime(),
+    );
+
+    const snapshot = await getHomepageSnapshot(db, "household_demo");
+
+    expect(snapshot?.historyMode).toBe("backfilled");
+    expect(snapshot?.historyCoverageMode).toBe("investments_backfilled");
+    expect(snapshot?.historyHasEstimatedPoints).toBe(true);
+    expect(snapshot?.history).toEqual([
+      {
+        cashMinor: 0,
+        completedAt: "2026-03-14T00:00:00.000Z",
+        coverageMode: "investments_backfilled",
+        investmentsMinor: 43120000,
+        isEstimated: false,
+        liabilitiesMinor: 0,
+        netWorthMinor: 43120000,
+      },
+      {
+        cashMinor: 0,
+        completedAt: "2026-03-15T00:00:00.000Z",
+        coverageMode: "investments_backfilled",
+        investmentsMinor: 43750000,
+        isEstimated: true,
+        liabilitiesMinor: 0,
+        netWorthMinor: 43750000,
+      },
+      {
+        cashMinor: 0,
+        completedAt: "2026-03-16T00:00:00.000Z",
+        coverageMode: "investments_backfilled",
+        investmentsMinor: 45574310,
+        isEstimated: false,
+        liabilitiesMinor: 0,
+        netWorthMinor: 45574310,
       },
     ]);
   });

@@ -401,6 +401,51 @@ async function importHoldingSnapshots(
   }
 }
 
+async function importDailyNetWorthFacts(
+  database: D1Database,
+  snapshot: HouseholdStateExport,
+) {
+  for (const fact of snapshot.dailyNetWorthFacts) {
+    await database
+      .prepare(
+        `
+          insert into daily_net_worth_facts (
+            household_id,
+            fact_date,
+            cash_minor,
+            investments_minor,
+            liabilities_minor,
+            net_worth_minor,
+            coverage_mode,
+            is_estimated,
+            rebuilt_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          on conflict(household_id, fact_date) do update set
+            cash_minor = excluded.cash_minor,
+            investments_minor = excluded.investments_minor,
+            liabilities_minor = excluded.liabilities_minor,
+            net_worth_minor = excluded.net_worth_minor,
+            coverage_mode = excluded.coverage_mode,
+            is_estimated = excluded.is_estimated,
+            rebuilt_at = excluded.rebuilt_at
+        `,
+      )
+      .bind(
+        fact.householdId,
+        fact.factDate,
+        fact.cashMinor,
+        fact.investmentsMinor,
+        fact.liabilitiesMinor,
+        fact.netWorthMinor,
+        fact.coverageMode,
+        fact.isEstimated ? 1 : 0,
+        fact.rebuiltAt.getTime(),
+      )
+      .run();
+  }
+}
+
 export function createHouseholdStateStore(database: D1Database) {
   void ensureHouseholdStateSchema(database);
 
@@ -510,6 +555,7 @@ export function createHouseholdStateStore(database: D1Database) {
       await importBalanceSnapshots(database, snapshot);
       await importHoldings(database, snapshot);
       await importHoldingSnapshots(database, snapshot);
+      await importDailyNetWorthFacts(database, snapshot);
     },
 
     ingestFixtureSyncBatch(

@@ -143,4 +143,17 @@ export const HOUSEHOLD_STATE_SCHEMA_SQL = `
     ON holding_snapshots(source_sync_run_id);
   CREATE UNIQUE INDEX IF NOT EXISTS holding_snapshots_holding_run_idx
     ON holding_snapshots(holding_id, source_sync_run_id);
+
+  CREATE TABLE IF NOT EXISTS daily_net_worth_facts (
+    cash_minor INTEGER NOT NULL DEFAULT 0,
+    coverage_mode TEXT NOT NULL CHECK(coverage_mode IN ('snapshot_only', 'investments_backfilled', 'mixed_snapshot_and_backfill')),
+    fact_date TEXT NOT NULL,
+    household_id TEXT NOT NULL REFERENCES households(id),
+    investments_minor INTEGER NOT NULL DEFAULT 0,
+    is_estimated INTEGER NOT NULL DEFAULT 0 CHECK(is_estimated IN (0, 1)),
+    liabilities_minor INTEGER NOT NULL DEFAULT 0,
+    net_worth_minor INTEGER NOT NULL DEFAULT 0,
+    rebuilt_at INTEGER NOT NULL,
+    UNIQUE(household_id, fact_date)
+  );
 `;

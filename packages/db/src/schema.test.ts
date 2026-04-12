@@ -726,4 +726,277 @@ describe("schema foundation for Plaid-backed sync", () => {
       symbol: "VTI",
     });
   });
+
+  test("supports securities, daily prices, and derived net-worth fact tables", () => {
+    const sqlite = createSchemaTestDatabase();
+    const createdAt = new Date("2026-04-11T00:00:00.000Z").getTime();
+
+    sqlite
+      .query(
+        `
+          insert into households (id, name, last_synced_at, created_at)
+          values (?, ?, ?, ?)
+        `,
+      )
+      .run("household_demo", "Vista Household", createdAt, createdAt);
+
+    sqlite
+      .query(
+        `
+          insert into accounts (
+            id,
+            household_id,
+            name,
+            institution_name,
+            account_type,
+            reporting_group,
+            balance_minor,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "acct_brokerage",
+        "household_demo",
+        "Taxable Brokerage",
+        "Vanguard",
+        "brokerage",
+        "investments",
+        0,
+        createdAt,
+        createdAt,
+      );
+
+    sqlite
+      .query(
+        `
+          insert into securities (
+            id,
+            provider,
+            provider_security_id,
+            symbol,
+            name,
+            security_type,
+            security_subtype,
+            currency,
+            price_source,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "security:plaid:security-vti",
+        "plaid",
+        "security-vti",
+        "VTI",
+        "Vanguard Total Stock Market ETF",
+        "etf",
+        "large_cap",
+        "USD",
+        "alpha_vantage",
+        createdAt,
+        createdAt,
+      );
+
+    expect(() =>
+      sqlite
+        .query(
+          `
+            insert into securities (
+              id,
+              provider,
+              provider_security_id,
+              symbol,
+              name,
+              security_type,
+              security_subtype,
+              currency,
+              price_source,
+              created_at,
+              updated_at
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(
+          "security:plaid:security-vti-duplicate",
+          "plaid",
+          "security-vti",
+          "VTI",
+          "Duplicate VTI",
+          "etf",
+          "large_cap",
+          "USD",
+          "alpha_vantage",
+          createdAt,
+          createdAt,
+        ),
+    ).toThrow();
+
+    sqlite
+      .query(
+        `
+          insert into security_price_daily (
+            security_id,
+            price_date,
+            close_price_minor,
+            currency,
+            source,
+            is_estimated,
+            fetched_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "security:plaid:security-vti",
+        "2026-04-10",
+        27543,
+        "USD",
+        "alpha_vantage",
+        0,
+        createdAt,
+      );
+
+    expect(() =>
+      sqlite
+        .query(
+          `
+            insert into security_price_daily (
+              security_id,
+              price_date,
+              close_price_minor,
+              currency,
+              source,
+              is_estimated,
+              fetched_at
+            )
+            values (?, ?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(
+          "security:plaid:security-vti",
+          "2026-04-10",
+          27543,
+          "USD",
+          "alpha_vantage",
+          0,
+          createdAt,
+        ),
+    ).toThrow();
+
+    sqlite
+      .query(
+        `
+          insert into daily_security_position_facts (
+            household_id,
+            account_id,
+            security_id,
+            position_date,
+            quantity,
+            cost_basis_minor,
+            source_window_start,
+            source_window_end,
+            is_estimated,
+            rebuilt_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "household_demo",
+        "acct_brokerage",
+        "security:plaid:security-vti",
+        "2026-04-10",
+        "10",
+        250000,
+        "2026-03-10",
+        "2026-04-10",
+        0,
+        createdAt,
+      );
+
+    sqlite
+      .query(
+        `
+          insert into daily_investment_account_value_facts (
+            household_id,
+            account_id,
+            fact_date,
+            market_value_minor,
+            cost_basis_minor,
+            priced_position_count,
+            missing_price_count,
+            is_estimated,
+            rebuilt_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "household_demo",
+        "acct_brokerage",
+        "2026-04-10",
+        275430,
+        250000,
+        1,
+        0,
+        0,
+        createdAt,
+      );
+
+    sqlite
+      .query(
+        `
+          insert into daily_net_worth_facts (
+            household_id,
+            fact_date,
+            cash_minor,
+            investments_minor,
+            liabilities_minor,
+            net_worth_minor,
+            coverage_mode,
+            is_estimated,
+            rebuilt_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "household_demo",
+        "2026-04-10",
+        0,
+        275430,
+        0,
+        275430,
+        "investments_backfilled",
+        0,
+        createdAt,
+      );
+
+    expect(
+      sqlite
+        .query(
+          `
+            select
+              price_date as priceDate,
+              close_price_minor as closePriceMinor,
+              source,
+              is_estimated as isEstimated
+            from security_price_daily
+            where security_id = ?
+          `,
+        )
+        .get("security:plaid:security-vti"),
+    ).toEqual({
+      closePriceMinor: 27543,
+      isEstimated: 0,
+      priceDate: "2026-04-10",
+      source: "alpha_vantage",
+    });
+  });
 });

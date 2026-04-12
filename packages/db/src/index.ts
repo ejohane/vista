@@ -2,6 +2,7 @@ export * from "./account-curation";
 export * from "./client";
 export * from "./fixture-sync-ingest";
 export * from "./fixtures";
+export * from "./historical-net-worth";
 export * from "./household-export";
 export * from "./household-service";
 export * from "./households";

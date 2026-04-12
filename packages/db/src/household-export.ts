@@ -1,6 +1,7 @@
 import type {
   AccountType,
   HoldingAssetClass,
+  NetWorthCoverageMode,
   OwnershipType,
   ProviderConnectionStatus,
   ProviderType,
@@ -113,9 +114,22 @@ export type ExportedHoldingSnapshotRow = {
   sourceSyncRunId: string;
 };
 
+export type ExportedDailyNetWorthFactRow = {
+  cashMinor: number;
+  coverageMode: NetWorthCoverageMode;
+  factDate: string;
+  householdId: string;
+  investmentsMinor: number;
+  isEstimated: boolean;
+  liabilitiesMinor: number;
+  netWorthMinor: number;
+  rebuiltAt: Date;
+};
+
 export type HouseholdStateExport = {
   accounts: ExportedAccountRow[];
   balanceSnapshots: ExportedBalanceSnapshotRow[];
+  dailyNetWorthFacts: ExportedDailyNetWorthFactRow[];
   holdings: ExportedHoldingRow[];
   household: ExportedHouseholdRow;
   holdingSnapshots: ExportedHoldingSnapshotRow[];
@@ -418,6 +432,37 @@ export async function exportHouseholdState(
       sourceSyncRunId: string;
     }>();
 
+  const dailyNetWorthFacts = await database
+    .prepare(
+      `
+        select
+          cash_minor as cashMinor,
+          coverage_mode as coverageMode,
+          fact_date as factDate,
+          household_id as householdId,
+          investments_minor as investmentsMinor,
+          is_estimated as isEstimated,
+          liabilities_minor as liabilitiesMinor,
+          net_worth_minor as netWorthMinor,
+          rebuilt_at as rebuiltAt
+        from daily_net_worth_facts
+        where household_id = ?
+        order by fact_date asc
+      `,
+    )
+    .bind(householdId)
+    .all<{
+      cashMinor: number;
+      coverageMode: NetWorthCoverageMode;
+      factDate: string;
+      householdId: string;
+      investmentsMinor: number;
+      isEstimated: boolean | number;
+      liabilitiesMinor: number;
+      netWorthMinor: number;
+      rebuiltAt: number;
+    }>();
+
   return {
     accounts: accounts.results.map((row) => ({
       ...row,
@@ -429,6 +474,11 @@ export async function exportHouseholdState(
     balanceSnapshots: balanceSnapshots.results.map((row) => ({
       ...row,
       capturedAt: toDate(row.capturedAt) ?? new Date(0),
+    })),
+    dailyNetWorthFacts: dailyNetWorthFacts.results.map((row) => ({
+      ...row,
+      isEstimated: toBoolean(row.isEstimated),
+      rebuiltAt: toDate(row.rebuiltAt) ?? new Date(0),
     })),
     holdings: holdings.results.map((row) => ({
       ...row,
