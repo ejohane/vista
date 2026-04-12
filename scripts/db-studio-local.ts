@@ -15,6 +15,7 @@ const rootDir = path.resolve(
 );
 const stateDir = path.join(rootDir, "apps", "web", ".wrangler", "state");
 const seedMarkerPath = path.join(stateDir, ".seeded-from-main");
+const skipSeedMarkerPath = path.join(stateDir, ".skip-seed-from-main");
 const studioConfigPath = path.join(rootDir, "drizzle.studio-local.config.ts");
 const drizzleKitBin = path.join(
   rootDir,
@@ -100,7 +101,11 @@ function resolveMainWorktreePath() {
 function ensureWorktreeStateSeededFromMain() {
   const mainWorktreePath = resolveMainWorktreePath();
 
-  if (mainWorktreePath === rootDir || existsSync(seedMarkerPath)) {
+  if (
+    mainWorktreePath === rootDir ||
+    existsSync(seedMarkerPath) ||
+    existsSync(skipSeedMarkerPath)
+  ) {
     return;
   }
 

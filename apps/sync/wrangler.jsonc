@@ -23,6 +23,12 @@
       "preview_database_id": "00000000-0000-0000-0000-000000000000"
     }
   ],
+  "services": [
+    {
+      "binding": "STATE_SERVICE",
+      "service": "vista-state"
+    }
+  ],
   "compatibility_flags": ["nodejs_compat"],
   "env": {
     "prod": {
@@ -32,6 +38,12 @@
         "enabled": true
       },
       "upload_source_maps": true,
+      "services": [
+        {
+          "binding": "STATE_SERVICE",
+          "service": "vista-state"
+        }
+      ],
       "vars": {
         "PLAID_ENV": "production"
       },

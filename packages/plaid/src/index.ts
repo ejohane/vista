@@ -36,6 +36,23 @@ type PlaidApiHolding = {
   unofficial_currency_code?: null | string;
 };
 
+type PlaidApiInvestmentTransaction = {
+  account_id: string;
+  amount: number;
+  date: string;
+  fees?: null | number;
+  investment_transaction_id: string;
+  iso_currency_code?: null | string;
+  name: string;
+  price?: null | number;
+  quantity: number;
+  security_id?: null | string;
+  subtype?: null | string;
+  transaction_datetime?: null | string;
+  type: string;
+  unofficial_currency_code?: null | string;
+};
+
 type PlaidApiSecurity = {
   close_price?: null | number;
   close_price_as_of?: null | string;
@@ -50,6 +67,25 @@ type PlaidApiSecurity = {
   type?: null | string;
   unofficial_currency_code?: null | string;
   update_datetime?: null | string;
+};
+
+type PlaidApiTransaction = {
+  account_id: string;
+  amount: number;
+  authorized_date?: null | string;
+  date: string;
+  merchant_name?: null | string;
+  name: string;
+  pending?: boolean;
+  personal_finance_category?: {
+    detailed?: null | string;
+    primary?: null | string;
+  };
+  transaction_id: string;
+};
+
+type PlaidApiRemovedTransaction = {
+  transaction_id: string;
 };
 
 type PlaidClientConfig = {
@@ -110,6 +146,7 @@ export type PlaidClient = {
     products: string[];
     requiredIfSupportedProducts?: string[];
     redirectUri?: string;
+    transactionsDaysRequested?: number;
     userId: string;
   }): Promise<{
     expiration: string;
@@ -130,6 +167,24 @@ export type PlaidClient = {
     accounts: PlaidApiAccount[];
     holdings: PlaidApiHolding[];
     securities: PlaidApiSecurity[];
+  }>;
+  getInvestmentsTransactions?(args: {
+    accessToken: string;
+    endDate: string;
+    startDate: string;
+  }): Promise<{
+    investmentTransactions: PlaidApiInvestmentTransaction[];
+  }>;
+  getTransactionsSync?(args: {
+    accessToken: string;
+    cursor?: null | string;
+  }): Promise<{
+    accounts: PlaidApiAccount[];
+    added: PlaidApiTransaction[];
+    hasMore: boolean;
+    modified: PlaidApiTransaction[];
+    nextCursor: string;
+    removed: PlaidApiRemovedTransaction[];
   }>;
 };
 
@@ -161,12 +216,27 @@ function snapshotId(runIdValue: string, accountId: string) {
   return `snapshot:${runIdValue}:${accountId}`;
 }
 
+function transactionId(accountId: string, providerTransactionId: string) {
+  return `txn:plaid:${escapeIdentifierSegment(accountId)}:${escapeIdentifierSegment(providerTransactionId)}`;
+}
+
 function holdingId(
   connectionId: string,
   providerAccountId: string,
   securityId: string,
 ) {
   return `holding:plaid:${escapeIdentifierSegment(connectionId)}:${escapeIdentifierSegment(providerAccountId)}:${escapeIdentifierSegment(securityId)}`;
+}
+
+function investmentTransactionId(
+  accountId: string,
+  providerTransactionId: string,
+) {
+  return `invtxn:plaid:${escapeIdentifierSegment(accountId)}:${escapeIdentifierSegment(providerTransactionId)}`;
+}
+
+function canonicalSecurityId(providerSecurityId: string) {
+  return `security:plaid:${escapeIdentifierSegment(providerSecurityId)}`;
 }
 
 function holdingSnapshotId(runIdValue: string, holdingIdValue: string) {
@@ -187,6 +257,34 @@ function toMinorUnits(value: null | number | undefined) {
   }
 
   return Math.round(value * 100);
+}
+
+function normalizeTransactionDirection(amount: number) {
+  return amount < 0 ? ("credit" as const) : ("debit" as const);
+}
+
+function parsePostedAt(value: string) {
+  const parsedTimestamp = Date.parse(value);
+
+  return Number.isNaN(parsedTimestamp) ? Date.now() : parsedTimestamp;
+}
+
+function normalizeTransactionCategory(transaction: PlaidApiTransaction) {
+  return (
+    transaction.personal_finance_category?.detailed?.trim() ||
+    transaction.personal_finance_category?.primary?.trim() ||
+    null
+  );
+}
+
+function normalizeInvestmentTransactionCurrency(
+  transaction: PlaidApiInvestmentTransaction,
+) {
+  return (
+    transaction.iso_currency_code ??
+    transaction.unofficial_currency_code ??
+    "USD"
+  );
 }
 
 function normalizeCurrency(account: PlaidApiAccount) {
@@ -261,6 +359,14 @@ function normalizeHoldingName(
 
 function normalizeHoldingQuantity(value: number) {
   return Number.isFinite(value) ? value.toString() : "0";
+}
+
+function normalizeSecurityType(security?: PlaidApiSecurity) {
+  return security?.type?.trim().toLowerCase() || null;
+}
+
+function normalizeSecuritySubtype(security?: PlaidApiSecurity) {
+  return security?.subtype?.trim().toLowerCase() || null;
 }
 
 function parseCapturedAt(
@@ -423,6 +529,11 @@ export function createPlaidClient(
           products: args.products,
           required_if_supported_products: args.requiredIfSupportedProducts,
           redirect_uri: args.redirectUri,
+          transactions: args.transactionsDaysRequested
+            ? {
+                days_requested: args.transactionsDaysRequested,
+              }
+            : undefined,
           user: {
             client_user_id: args.userId,
           },
@@ -504,6 +615,75 @@ export function createPlaidClient(
         accounts: response.accounts ?? [],
         holdings: response.holdings ?? [],
         securities: response.securities ?? [],
+      };
+    },
+
+    async getInvestmentsTransactions(args) {
+      const investmentTransactions: PlaidApiInvestmentTransaction[] = [];
+      let offset = 0;
+      let totalInvestmentTransactions = 0;
+
+      do {
+        const response = await requestPlaid<{
+          investment_transactions: PlaidApiInvestmentTransaction[];
+          total_investment_transactions: number;
+        }>({
+          baseUrl,
+          body: {
+            access_token: args.accessToken,
+            end_date: args.endDate,
+            options: {
+              count: 500,
+              offset,
+            },
+            start_date: args.startDate,
+          },
+          clientId: config.clientId,
+          fetchImpl,
+          path: "/investments/transactions/get",
+          secret: config.secret,
+        });
+
+        const page = response.investment_transactions ?? [];
+        investmentTransactions.push(...page);
+        totalInvestmentTransactions =
+          response.total_investment_transactions ?? 0;
+        offset += page.length;
+      } while (investmentTransactions.length < totalInvestmentTransactions);
+
+      return {
+        investmentTransactions,
+      };
+    },
+
+    async getTransactionsSync(args) {
+      const response = await requestPlaid<{
+        accounts: PlaidApiAccount[];
+        added: PlaidApiTransaction[];
+        has_more: boolean;
+        modified: PlaidApiTransaction[];
+        next_cursor: string;
+        removed: PlaidApiRemovedTransaction[];
+      }>({
+        baseUrl,
+        body: {
+          access_token: args.accessToken,
+          count: 500,
+          cursor: args.cursor ?? undefined,
+        },
+        clientId: config.clientId,
+        fetchImpl,
+        path: "/transactions/sync",
+        secret: config.secret,
+      });
+
+      return {
+        accounts: response.accounts ?? [],
+        added: response.added ?? [],
+        hasMore: response.has_more ?? false,
+        modified: response.modified ?? [],
+        nextCursor: response.next_cursor,
+        removed: response.removed ?? [],
       };
     },
   };
@@ -645,6 +825,250 @@ async function failSyncRun(args: {
     )
     .bind(Date.now(), args.errorSummary, "failed", args.runId)
     .run();
+}
+
+async function loadSyncCheckpoint(database: D1Database, connectionId: string) {
+  return database
+    .prepare(
+      `
+        select cursor
+        from sync_checkpoints
+        where provider_connection_id = ?
+      `,
+    )
+    .bind(connectionId)
+    .first<{ cursor: string }>();
+}
+
+async function saveSyncCheckpoint(args: {
+  connectionId: string;
+  cursor: string;
+  database: D1Database;
+  now: Date;
+}) {
+  await args.database
+    .prepare(
+      `
+        insert into sync_checkpoints (
+          provider_connection_id,
+          cursor,
+          updated_at
+        )
+        values (?, ?, ?)
+        on conflict(provider_connection_id) do update set
+          cursor = excluded.cursor,
+          updated_at = excluded.updated_at
+      `,
+    )
+    .bind(args.connectionId, args.cursor, args.now.getTime())
+    .run();
+}
+
+async function upsertPlaidTransaction(args: {
+  connectionId: string;
+  database: D1Database;
+  now: Date;
+  runId: string;
+  transaction: PlaidApiTransaction;
+}) {
+  const accountId = canonicalAccountId(
+    args.connectionId,
+    args.transaction.account_id,
+  );
+  const category = normalizeTransactionCategory(args.transaction);
+
+  await args.database
+    .prepare(
+      `
+        insert into transactions (
+          id,
+          account_id,
+          provider_transaction_id,
+          posted_at,
+          amount_minor,
+          direction,
+          description,
+          merchant_name,
+          category_raw,
+          category_normalized,
+          exclude_from_reporting,
+          source_sync_run_id
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(account_id, provider_transaction_id) do update set
+          posted_at = excluded.posted_at,
+          amount_minor = excluded.amount_minor,
+          direction = excluded.direction,
+          description = excluded.description,
+          merchant_name = excluded.merchant_name,
+          category_raw = excluded.category_raw,
+          category_normalized = excluded.category_normalized,
+          source_sync_run_id = excluded.source_sync_run_id
+      `,
+    )
+    .bind(
+      transactionId(accountId, args.transaction.transaction_id),
+      accountId,
+      args.transaction.transaction_id,
+      parsePostedAt(args.transaction.date),
+      toMinorUnits(Math.abs(args.transaction.amount)),
+      normalizeTransactionDirection(args.transaction.amount),
+      args.transaction.name.trim() || args.transaction.transaction_id,
+      args.transaction.merchant_name?.trim() || null,
+      category,
+      category,
+      0,
+      args.runId,
+    )
+    .run();
+
+  return 1;
+}
+
+async function removePlaidTransaction(args: {
+  connectionId: string;
+  database: D1Database;
+  providerTransactionId: string;
+}) {
+  await args.database
+    .prepare(
+      `
+        delete from transactions
+        where provider_transaction_id = ?
+          and account_id in (
+            select accounts.id
+            from accounts
+            join provider_accounts
+              on accounts.provider_account_id = provider_accounts.id
+            where provider_accounts.provider_connection_id = ?
+          )
+      `,
+    )
+    .bind(args.providerTransactionId, args.connectionId)
+    .run();
+
+  return 1;
+}
+
+async function upsertPlaidInvestmentTransaction(args: {
+  connectionId: string;
+  database: D1Database;
+  now?: Date;
+  runId: string;
+  transaction: PlaidApiInvestmentTransaction;
+}) {
+  const accountId = canonicalAccountId(
+    args.connectionId,
+    args.transaction.account_id,
+  );
+  const postedAt = parsePostedAt(args.transaction.date);
+  const normalizedSecurityId = args.transaction.security_id?.trim()
+    ? canonicalSecurityId(args.transaction.security_id.trim())
+    : null;
+
+  if (normalizedSecurityId) {
+    await args.database
+      .prepare(
+        `
+          insert or ignore into securities (
+            id,
+            provider,
+            provider_security_id,
+            symbol,
+            name,
+            security_type,
+            security_subtype,
+            currency,
+            price_source,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .bind(
+        normalizedSecurityId,
+        "plaid",
+        args.transaction.security_id?.trim() ?? normalizedSecurityId,
+        null,
+        args.transaction.name.trim() ||
+          args.transaction.investment_transaction_id,
+        null,
+        null,
+        normalizeInvestmentTransactionCurrency(args.transaction),
+        "alpha_vantage",
+        args.now?.getTime() ?? postedAt,
+        args.now?.getTime() ?? postedAt,
+      )
+      .run();
+  }
+
+  await args.database
+    .prepare(
+      `
+        insert into investment_transactions (
+          id,
+          account_id,
+          provider_transaction_id,
+          posted_at,
+          trade_at,
+          amount_minor,
+          price_minor,
+          fees_minor,
+          quantity,
+          name,
+          security_id,
+          type,
+          subtype,
+          currency,
+          source_sync_run_id
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(account_id, provider_transaction_id) do update set
+          posted_at = excluded.posted_at,
+          trade_at = excluded.trade_at,
+          amount_minor = excluded.amount_minor,
+          price_minor = excluded.price_minor,
+          fees_minor = excluded.fees_minor,
+          quantity = excluded.quantity,
+          name = excluded.name,
+          security_id = excluded.security_id,
+          type = excluded.type,
+          subtype = excluded.subtype,
+          currency = excluded.currency,
+          source_sync_run_id = excluded.source_sync_run_id
+      `,
+    )
+    .bind(
+      investmentTransactionId(
+        accountId,
+        args.transaction.investment_transaction_id,
+      ),
+      accountId,
+      args.transaction.investment_transaction_id,
+      postedAt,
+      args.transaction.transaction_datetime
+        ? parseCapturedAt(args.transaction.transaction_datetime, postedAt)
+        : null,
+      toMinorUnits(Math.abs(args.transaction.amount)),
+      args.transaction.price === null || args.transaction.price === undefined
+        ? null
+        : toMinorUnits(args.transaction.price),
+      args.transaction.fees === null || args.transaction.fees === undefined
+        ? null
+        : toMinorUnits(args.transaction.fees),
+      normalizeHoldingQuantity(args.transaction.quantity),
+      args.transaction.name.trim() ||
+        args.transaction.investment_transaction_id,
+      normalizedSecurityId,
+      args.transaction.type.trim(),
+      args.transaction.subtype?.trim() || null,
+      normalizeInvestmentTransactionCurrency(args.transaction),
+      args.runId,
+    )
+    .run();
+
+  return 1;
 }
 
 async function upsertPlaidAccount(args: {
@@ -797,12 +1221,56 @@ async function upsertPlaidHolding(args: {
     args.holding.account_id,
     args.holding.security_id,
   );
+  const normalizedSecurityId = canonicalSecurityId(args.holding.security_id);
   const timestamp = args.now.getTime();
-  const securityType = args.security?.type?.trim();
-  const securitySubtype = args.security?.subtype?.trim();
+  const securityType = normalizeSecurityType(args.security);
+  const securitySubtype = normalizeSecuritySubtype(args.security);
   const symbol = args.security?.ticker_symbol?.trim() || null;
+  const priceDate =
+    args.holding.institution_price_as_of?.trim() ||
+    args.now.toISOString().slice(0, 10);
 
   await args.database.batch([
+    args.database
+      .prepare(
+        `
+          insert into securities (
+            id,
+            provider,
+            provider_security_id,
+            symbol,
+            name,
+            security_type,
+            security_subtype,
+            currency,
+            price_source,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          on conflict(id) do update set
+            symbol = excluded.symbol,
+            name = excluded.name,
+            security_type = excluded.security_type,
+            security_subtype = excluded.security_subtype,
+            currency = excluded.currency,
+            price_source = excluded.price_source,
+            updated_at = excluded.updated_at
+        `,
+      )
+      .bind(
+        normalizedSecurityId,
+        "plaid",
+        args.holding.security_id,
+        symbol,
+        normalizeHoldingName(args.holding, args.security),
+        securityType,
+        securitySubtype,
+        normalizeHoldingCurrency(args.holding, args.security),
+        "alpha_vantage",
+        timestamp,
+        timestamp,
+      ),
     args.database
       .prepare(
         `
@@ -836,11 +1304,41 @@ async function upsertPlaidHolding(args: {
         `security:${args.holding.security_id}`,
         symbol,
         normalizeHoldingName(args.holding, args.security),
-        args.holding.security_id,
+        normalizedSecurityId,
         normalizeHoldingAssetClass(args.security),
         [securityType, securitySubtype].filter(Boolean).join(":") || null,
         normalizeHoldingCurrency(args.holding, args.security),
         timestamp,
+        timestamp,
+      ),
+    args.database
+      .prepare(
+        `
+          insert into security_price_daily (
+            security_id,
+            price_date,
+            close_price_minor,
+            currency,
+            source,
+            is_estimated,
+            fetched_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?)
+          on conflict(security_id, price_date) do update set
+            close_price_minor = excluded.close_price_minor,
+            currency = excluded.currency,
+            source = excluded.source,
+            is_estimated = excluded.is_estimated,
+            fetched_at = excluded.fetched_at
+        `,
+      )
+      .bind(
+        normalizedSecurityId,
+        priceDate,
+        toMinorUnits(args.holding.institution_price),
+        normalizeHoldingCurrency(args.holding, args.security),
+        "plaid_holdings",
+        0,
         timestamp,
       ),
     args.database
@@ -972,6 +1470,76 @@ export async function syncPlaidConnection(
         runId: currentRunId,
         security: securitiesById.get(holding.security_id),
       });
+    }
+
+    if (client.getTransactionsSync) {
+      let cursor =
+        (await loadSyncCheckpoint(args.database, connection.id))?.cursor ??
+        null;
+      let hasMore = false;
+
+      do {
+        const transactionsResponse = await client.getTransactionsSync({
+          accessToken,
+          cursor,
+        });
+
+        for (const transaction of [
+          ...transactionsResponse.added,
+          ...transactionsResponse.modified,
+        ]) {
+          recordsChanged += await upsertPlaidTransaction({
+            connectionId: connection.id,
+            database: args.database,
+            now,
+            runId: currentRunId,
+            transaction,
+          });
+        }
+
+        for (const removedTransaction of transactionsResponse.removed) {
+          recordsChanged += await removePlaidTransaction({
+            connectionId: connection.id,
+            database: args.database,
+            providerTransactionId: removedTransaction.transaction_id,
+          });
+        }
+
+        cursor = transactionsResponse.nextCursor;
+        hasMore = transactionsResponse.hasMore;
+      } while (hasMore);
+
+      if (cursor) {
+        await saveSyncCheckpoint({
+          connectionId: connection.id,
+          cursor,
+          database: args.database,
+          now,
+        });
+      }
+    }
+
+    if (client.getInvestmentsTransactions && investmentAccounts.length > 0) {
+      const endDate = now.toISOString().slice(0, 10);
+      const startDateValue = new Date(now);
+      startDateValue.setUTCDate(startDateValue.getUTCDate() - 730);
+      const startDate = startDateValue.toISOString().slice(0, 10);
+      const investmentTransactionsResponse =
+        await client.getInvestmentsTransactions({
+          accessToken,
+          endDate,
+          startDate,
+        });
+
+      for (const transaction of investmentTransactionsResponse.investmentTransactions) {
+        recordsChanged += await upsertPlaidInvestmentTransaction({
+          connectionId: connection.id,
+          database: args.database,
+          now,
+          runId: currentRunId,
+          transaction,
+        });
+      }
     }
 
     await args.database

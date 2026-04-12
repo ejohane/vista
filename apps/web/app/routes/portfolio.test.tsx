@@ -52,6 +52,7 @@ describe("portfolio route", () => {
       accounts: [],
       allocationBuckets: [],
       asOfDate: "2026-04-11",
+      householdId: "household_viewer",
       householdName: "My Household",
       kind: "ready",
       lastSyncedAt: "2026-04-11T14:00:00.000Z",
@@ -105,6 +106,7 @@ describe("portfolio route", () => {
             },
           ],
           asOfDate: "2026-03-18",
+          householdId: "household_demo",
           householdName: "Vista Household",
           kind: "ready",
           lastSyncedAt: "2026-03-18T18:30:00.000Z",
@@ -145,6 +147,7 @@ describe("portfolio route", () => {
     const html = renderToStaticMarkup(
       <PortfolioScreen
         loaderData={{
+          householdId: "household_demo",
           kind: "empty",
         }}
       />,
@@ -153,6 +156,6 @@ describe("portfolio route", () => {
     expect(html).toContain("Investment Portfolio");
     expect(html).toContain("No holdings yet");
     expect(html).toContain("Connect Plaid");
-    expect(html).toContain("/connect/plaid");
+    expect(html).toContain("/connect/plaid?householdId=household_demo");
   });
 });

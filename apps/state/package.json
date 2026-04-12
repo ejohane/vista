@@ -1,0 +1,22 @@
+{
+  "name": "state",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --outdir .wrangler/deploy",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "cf-typegen": "wrangler types",
+    "typecheck": "bun run cf-typegen && tsc --noEmit"
+  },
+  "dependencies": {
+    "@vista/db": "workspace:*",
+    "@vista/household-state": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.5.2",
+    "wrangler": "^4.74.0"
+  }
+}

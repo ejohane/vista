@@ -5,9 +5,14 @@ import {
   WalletIcon,
 } from "@phosphor-icons/react";
 import {
+  createD1HouseholdAccess,
+  createD1HouseholdService,
   getDb,
-  getHomepageSnapshot,
+  type getHomepageSnapshot,
+  type HouseholdAccess,
+  type HouseholdService,
   type NetWorthHistoryPoint,
+  resolveHouseholdSelection,
 } from "@vista/db";
 import { Area, AreaChart, XAxis, YAxis } from "recharts";
 
@@ -33,9 +38,29 @@ import {
   formatUpdatedAt,
   formatUsd,
 } from "@/lib/format";
+import {
+  buildHouseholdPath,
+  readRequestedHouseholdId,
+  resolveViewerHouseholdId,
+} from "@/lib/household-routing";
+import { createWebRuntimeHouseholdService } from "@/lib/runtime-household-service";
 import { readCloudflareEnv } from "@/lib/server-context";
 import { cn } from "@/lib/utils";
 import type { Route } from "./+types/home";
+
+type HomeLoaderDeps = {
+  createHouseholdAccess?: (db: ReturnType<typeof getDb>) => HouseholdAccess;
+  createHouseholdService?: (
+    db: ReturnType<typeof getDb>,
+  ) => Pick<HouseholdService, "getHomepageSnapshot">;
+  getHomepageSnapshot?: typeof getHomepageSnapshot;
+  loadHomepageSnapshot?: (args: {
+    env: Env;
+    householdId: string;
+  }) => Promise<Awaited<ReturnType<typeof getHomepageSnapshot>>>;
+  requireViewerContext?: typeof requireViewerContext;
+  resolveHouseholdSelection?: typeof resolveHouseholdSelection;
+};
 
 // ── Helpers ────────────────────────────────────────────────
 
@@ -205,7 +230,7 @@ function NetWorthChart({ history }: { history: NetWorthHistoryPoint[] }) {
 }
 
 const providerMeta = {
-  plaid: { name: "Plaid", href: "/connect/plaid" },
+  plaid: { name: "Plaid", path: "/connect/plaid" },
 } as const;
 
 function isSupportedProvider(
@@ -238,7 +263,13 @@ function statusOf(s: ConnectionState) {
   return { color: "bg-muted-foreground/40", label: "Not connected" };
 }
 
-function ProviderRow({ state }: { state: ConnectionState }) {
+function ProviderRow({
+  householdId,
+  state,
+}: {
+  householdId: string;
+  state: ConnectionState;
+}) {
   if (!isSupportedProvider(state.provider)) {
     return null;
   }
@@ -256,7 +287,7 @@ function ProviderRow({ state }: { state: ConnectionState }) {
         </div>
       </div>
       <a
-        href={provider.href}
+        href={buildHouseholdPath(provider.path, householdId)}
         className="text-xs font-medium text-primary hover:underline"
       >
         {state.status === "not_connected" ? "Connect" : "Manage"}
@@ -274,46 +305,138 @@ export function meta(_: Route.MetaArgs) {
   ];
 }
 
-export function createHomeLoader(deps?: {
-  getHomepageSnapshot?: typeof getHomepageSnapshot;
-  requireViewerContext?: typeof requireViewerContext;
-}) {
-  const loadHomepageSnapshot = deps?.getHomepageSnapshot ?? getHomepageSnapshot;
-  const requireViewer = deps?.requireViewerContext ?? requireViewerContext;
+function buildLoaderErrorData(title: string, message: string) {
+  return {
+    kind: "error" as const,
+    message,
+    title,
+  };
+}
+
+export function createHomeLoader(deps: HomeLoaderDeps = {}) {
+  const requireViewer = deps.requireViewerContext ?? requireViewerContext;
+  const createHouseholdAccess =
+    deps.createHouseholdAccess ?? createD1HouseholdAccess;
+  const createHouseholdService =
+    deps.createHouseholdService ?? createD1HouseholdService;
+  const loadHomepageSnapshot =
+    deps.loadHomepageSnapshot ??
+    (deps.getHomepageSnapshot
+      ? ({ env, householdId }: { env: Env; householdId: string }) => {
+          const getHomepageSnapshot = deps.getHomepageSnapshot;
+
+          if (!getHomepageSnapshot) {
+            throw new Error("Homepage snapshot loader is not configured.");
+          }
+
+          return getHomepageSnapshot(getDb(env.DB), householdId);
+        }
+      : ({ env, householdId }: { env: Env; householdId: string }) =>
+          createWebRuntimeHouseholdService(env).getHomepageSnapshot(
+            householdId,
+          ));
+  const resolveSelectedHousehold =
+    deps.resolveHouseholdSelection ?? resolveHouseholdSelection;
 
   return async function loader({ context, request }: Route.LoaderArgs) {
-    const viewer = await requireViewer({ context, request });
     const env = readCloudflareEnv(context);
-    const snapshot = await loadHomepageSnapshot(
-      getDb(env.DB),
-      viewer.householdId,
-    );
 
-    if (!snapshot) {
+    try {
+      if (
+        deps.createHouseholdAccess ||
+        deps.createHouseholdService ||
+        deps.resolveHouseholdSelection
+      ) {
+        const db = getDb(env.DB);
+        const household = await resolveSelectedHousehold(
+          createHouseholdAccess(db),
+          readRequestedHouseholdId(request),
+        );
+
+        if (!household) {
+          return {
+            kind: "empty" as const,
+            nextStepCommand: "bun run db:seed:local",
+          };
+        }
+
+        const snapshot = await createHouseholdService(db).getHomepageSnapshot(
+          household.id,
+        );
+
+        if (!snapshot) {
+          return {
+            kind: "empty" as const,
+            nextStepCommand: "bun run db:seed:local",
+          };
+        }
+
+        return {
+          kind: "ready" as const,
+          changeSummary: snapshot.changeSummary,
+          connectionStates: snapshot.connectionStates
+            .filter((state) => isSupportedProvider(state.provider))
+            .map((state) => ({
+              ...state,
+              lastSuccessfulSyncAt:
+                state.lastSuccessfulSyncAt?.toISOString() ?? null,
+              latestRunAt: state.latestRunAt?.toISOString() ?? null,
+            })),
+          hasSuccessfulSync: snapshot.hasSuccessfulSync,
+          history: snapshot.history,
+          historyCoverageMode: snapshot.historyCoverageMode ?? null,
+          historyHasEstimatedPoints:
+            snapshot.historyHasEstimatedPoints ?? false,
+          historyMode: snapshot.historyMode ?? "snapshot",
+          householdId: household.id,
+          householdName: snapshot.householdName,
+          lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
+          reportingGroups: snapshot.reportingGroups,
+          totals: snapshot.totals,
+        };
+      }
+
+      const viewer = await requireViewer({ context, request });
+      const householdId = resolveViewerHouseholdId(request, viewer.householdId);
+      const snapshot = await loadHomepageSnapshot({ env, householdId });
+
+      if (!snapshot) {
+        return {
+          kind: "empty" as const,
+          nextStepCommand: "bun run db:seed:local",
+        };
+      }
+
       return {
-        kind: "empty" as const,
-        nextStepCommand: "bun run db:seed:local",
+        kind: "ready" as const,
+        changeSummary: snapshot.changeSummary,
+        connectionStates: snapshot.connectionStates
+          .filter((state) => isSupportedProvider(state.provider))
+          .map((state) => ({
+            ...state,
+            lastSuccessfulSyncAt:
+              state.lastSuccessfulSyncAt?.toISOString() ?? null,
+            latestRunAt: state.latestRunAt?.toISOString() ?? null,
+          })),
+        hasSuccessfulSync: snapshot.hasSuccessfulSync,
+        history: snapshot.history,
+        historyCoverageMode: snapshot.historyCoverageMode ?? null,
+        historyHasEstimatedPoints: snapshot.historyHasEstimatedPoints ?? false,
+        historyMode: snapshot.historyMode ?? "snapshot",
+        householdId,
+        householdName: snapshot.householdName,
+        lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
+        reportingGroups: snapshot.reportingGroups,
+        totals: snapshot.totals,
       };
+    } catch (error) {
+      return buildLoaderErrorData(
+        "Household selection required",
+        error instanceof Error
+          ? error.message
+          : "Household selection could not be resolved.",
+      );
     }
-
-    return {
-      kind: "ready" as const,
-      changeSummary: snapshot.changeSummary,
-      connectionStates: snapshot.connectionStates
-        .filter((state) => isSupportedProvider(state.provider))
-        .map((state) => ({
-          ...state,
-          lastSuccessfulSyncAt:
-            state.lastSuccessfulSyncAt?.toISOString() ?? null,
-          latestRunAt: state.latestRunAt?.toISOString() ?? null,
-        })),
-      hasSuccessfulSync: snapshot.hasSuccessfulSync,
-      history: snapshot.history,
-      householdName: snapshot.householdName,
-      lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
-      reportingGroups: snapshot.reportingGroups,
-      totals: snapshot.totals,
-    };
   };
 }
 
@@ -322,6 +445,23 @@ export const loader = createHomeLoader();
 // ── Page ───────────────────────────────────────────────────
 
 export default function Home({ loaderData }: Route.ComponentProps) {
+  if (loaderData.kind === "error") {
+    return (
+      <DashboardShell activePath="/">
+        <div className="flex min-h-[80vh] items-center justify-center p-6">
+          <Card className="w-full max-w-md">
+            <CardContent className="space-y-3 p-6 text-center">
+              <p className="text-lg font-medium">{loaderData.title}</p>
+              <p className="text-sm text-muted-foreground">
+                {loaderData.message}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardShell>
+    );
+  }
+
   if (loaderData.kind === "empty") {
     return (
       <DashboardShell activePath="/">
@@ -350,11 +490,22 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     changeSummary,
     connectionStates,
     history,
+    householdId,
+    historyCoverageMode,
+    historyHasEstimatedPoints,
+    historyMode,
     householdName,
     lastSyncedAt,
     reportingGroups,
     totals,
   } = loaderData;
+  const historyDescription =
+    historyMode === "backfilled"
+      ? "Backfilled from investment transactions and daily prices"
+      : "Historical trajectory across syncs";
+  const showMixedCoverageNote =
+    historyMode === "backfilled" &&
+    historyCoverageMode === "mixed_snapshot_and_backfill";
 
   return (
     <DashboardShell activePath="/">
@@ -399,12 +550,10 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle>Net Worth</CardTitle>
-                  <CardDescription>
-                    Historical trajectory across syncs
-                  </CardDescription>
+                  <CardDescription>{historyDescription}</CardDescription>
                 </div>
                 <a
-                  href="/portfolio"
+                  href={buildHouseholdPath("/portfolio", householdId)}
                   className={cn(
                     buttonVariants({ variant: "ghost", size: "sm" }),
                     "gap-1 text-xs",
@@ -416,6 +565,16 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               </div>
             </CardHeader>
             <CardContent>
+              {historyHasEstimatedPoints ? (
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Includes estimated pricing coverage
+                </p>
+              ) : null}
+              {showMixedCoverageNote ? (
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Cash and liabilities remain snapshot-backed
+                </p>
+              ) : null}
               <NetWorthChart history={history} />
             </CardContent>
           </Card>
@@ -472,7 +631,11 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           <CardContent>
             <div className="grid gap-3 sm:grid-cols-3">
               {connectionStates.map((state) => (
-                <ProviderRow key={state.provider} state={state} />
+                <ProviderRow
+                  key={state.provider}
+                  householdId={householdId}
+                  state={state}
+                />
               ))}
             </div>
           </CardContent>

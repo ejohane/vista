@@ -317,6 +317,14 @@ function createPortfolioTestDb() {
 }
 
 describe("getPortfolioSnapshot", () => {
+  test("throws when the household id is omitted", async () => {
+    const db = createPortfolioTestDb();
+
+    await expect(getPortfolioSnapshot(db, undefined as never)).rejects.toThrow(
+      "Household id is required.",
+    );
+  });
+
   test("builds a portfolio view from the latest holding snapshots", async () => {
     const db = createPortfolioTestDb();
 
@@ -393,6 +401,8 @@ describe("getPortfolioSnapshot", () => {
   test("returns null when no household id is provided", async () => {
     const db = createPortfolioTestDb();
 
-    await expect(getPortfolioSnapshot(db)).resolves.toBeNull();
+    await expect(getPortfolioSnapshot(db, undefined as never)).rejects.toThrow(
+      "Household id is required.",
+    );
   });
 });

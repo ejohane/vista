@@ -4,6 +4,11 @@ import {
   LinkIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react";
+import {
+  createHouseholdStateClientFromEnv,
+  ensureHouseholdStateHydrated,
+  readHouseholdStateMode,
+} from "@vista/household-state";
 import { syncPlaidConnection } from "@vista/plaid";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -25,6 +30,10 @@ import {
 } from "@/components/ui/card";
 import { requireViewerContext } from "@/lib/auth";
 import {
+  buildHouseholdPath,
+  resolveViewerHouseholdId,
+} from "@/lib/household-routing";
+import {
   createPlaidLinkToken,
   exchangePlaidPublicToken,
 } from "@/lib/plaid-connect";
@@ -45,6 +54,7 @@ type LoaderData =
     }
   | {
       kind: "ready";
+      householdId: string;
       linkToken: string;
     };
 
@@ -206,8 +216,20 @@ export function createConnectPlaidAction(deps?: {
 
     const formData = await request.formData();
     const publicToken = formData.get("publicToken");
+    const householdId = formData.get("householdId");
     const institutionId = formData.get("institutionId");
     const institutionName = formData.get("institutionName");
+    const selectedHouseholdId =
+      typeof householdId === "string" && householdId.trim()
+        ? householdId.trim()
+        : resolveViewerHouseholdId(request, viewer.householdId);
+
+    if (selectedHouseholdId !== viewer.householdId) {
+      return {
+        message: "The requested household is not available.",
+        ok: false,
+      } satisfies ActionData;
+    }
 
     if (typeof publicToken !== "string" || !publicToken.trim()) {
       return {
@@ -216,29 +238,88 @@ export function createConnectPlaidAction(deps?: {
       } satisfies ActionData;
     }
 
+    const householdStateEnv = context.cloudflare.env as Env &
+      Record<string, unknown>;
+    const stateMode = readHouseholdStateMode(householdStateEnv);
+    const stateClient = createHouseholdStateClientFromEnv(householdStateEnv);
+
     try {
       const result = await exchangeConnection({
         clientId,
         database: env.DB,
         environment,
-        householdId: viewer.householdId,
+        householdId: selectedHouseholdId,
         institutionId:
           typeof institutionId === "string" ? institutionId : undefined,
         institutionName:
           typeof institutionName === "string" ? institutionName : undefined,
         providerTokenEncryptionKey,
+        onConnectionPersisted:
+          stateClient && stateMode !== "legacy"
+            ? async (connection) => {
+                await ensureHouseholdStateHydrated({
+                  client: stateClient,
+                  database: context.cloudflare.env.DB,
+                  householdId: connection.householdId,
+                });
+                await stateClient.createProviderConnection({
+                  accessToken: connection.accessToken,
+                  createdAt: connection.createdAt,
+                  externalConnectionId: connection.externalConnectionId,
+                  householdId: connection.householdId,
+                  id: connection.connectionId,
+                  institutionId: connection.institutionId,
+                  institutionName: connection.institutionName,
+                  plaidItemId: connection.plaidItemId,
+                  provider: "plaid",
+                  status: "active",
+                  updatedAt: connection.updatedAt,
+                });
+              }
+            : undefined,
+        persistAccessTokenInDatabase: stateMode !== "state",
         publicToken,
         secret,
       });
 
       try {
-        await syncConnection({
-          clientId,
-          connectionId: result.connectionId,
-          database: env.DB,
-          environment,
-          secret,
-        });
+        if (stateMode === "state") {
+          if (!stateClient) {
+            throw new Error("Household state client is not configured.");
+          }
+
+          await stateClient.syncPlaidConnection({
+            connectionId: result.connectionId,
+            householdId: result.householdId,
+          });
+        } else if (stateMode === "dual") {
+          await syncConnection({
+            clientId,
+            connectionId: result.connectionId,
+            database: context.cloudflare.env.DB,
+            environment,
+            providerTokenEncryptionKey,
+            secret,
+          });
+
+          if (!stateClient) {
+            throw new Error("Household state client is not configured.");
+          }
+
+          await stateClient.syncPlaidConnection({
+            connectionId: result.connectionId,
+            householdId: result.householdId,
+          });
+        } else {
+          await syncConnection({
+            clientId,
+            connectionId: result.connectionId,
+            database: context.cloudflare.env.DB,
+            environment,
+            providerTokenEncryptionKey,
+            secret,
+          });
+        }
       } catch (error) {
         const reason =
           error instanceof Error
@@ -257,7 +338,7 @@ export function createConnectPlaidAction(deps?: {
         } satisfies ActionData;
       }
 
-      return redirect("/");
+      return redirect(buildHouseholdPath("/", result.householdId));
     } catch (error) {
       console.error("Plaid onboarding failed.", {
         error: error instanceof Error ? error.message : String(error),
@@ -324,12 +405,12 @@ export function createConnectPlaidLoader(deps?: {
     }
 
     try {
+      const householdId = resolveViewerHouseholdId(request, viewer.householdId);
       const result = await createLinkToken({
         clientId,
         database: env.DB,
         environment,
-        householdId: viewer.householdId,
-        providerTokenEncryptionKey,
+        householdId,
         redirectUrl: buildPlaidRedirectUrl({
           configuredRedirectUrl,
           requestUrl: request.url,
@@ -339,6 +420,7 @@ export function createConnectPlaidLoader(deps?: {
 
       return {
         kind: "ready",
+        householdId: result.householdId,
         linkToken: result.linkToken,
       };
     } catch (error) {
@@ -506,6 +588,10 @@ export default function ConnectPlaid() {
         setLinkError(null);
         const formData = new FormData();
         formData.set("publicToken", publicToken);
+
+        if (loaderData.kind === "ready") {
+          formData.set("householdId", loaderData.householdId);
+        }
 
         const institutionId = metadata.institution?.institution_id?.trim();
         const institutionName = metadata.institution?.name?.trim();

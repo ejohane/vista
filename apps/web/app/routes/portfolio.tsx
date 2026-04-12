@@ -1,5 +1,13 @@
 import { MagnifyingGlassIcon } from "@phosphor-icons/react";
-import { getDb, getPortfolioSnapshot } from "@vista/db";
+import {
+  createD1HouseholdAccess,
+  createD1HouseholdService,
+  getDb,
+  type getPortfolioSnapshot,
+  type HouseholdAccess,
+  type HouseholdService,
+  resolveHouseholdSelection,
+} from "@vista/db";
 import { useDeferredValue, useState } from "react";
 
 import { DashboardShell } from "@/components/dashboard-shell";
@@ -19,9 +27,29 @@ import {
   formatUpdatedAt,
   formatUsd,
 } from "@/lib/format";
+import {
+  buildHouseholdPath,
+  readRequestedHouseholdId,
+  resolveViewerHouseholdId,
+} from "@/lib/household-routing";
+import { createWebRuntimeHouseholdService } from "@/lib/runtime-household-service";
 import { readCloudflareEnv } from "@/lib/server-context";
 import { cn } from "@/lib/utils";
 import type { Route } from "./+types/portfolio";
+
+type PortfolioLoaderDeps = {
+  createHouseholdAccess?: (db: ReturnType<typeof getDb>) => HouseholdAccess;
+  createHouseholdService?: (
+    db: ReturnType<typeof getDb>,
+  ) => Pick<HouseholdService, "getPortfolioSnapshot">;
+  getPortfolioSnapshot?: typeof getPortfolioSnapshot;
+  loadPortfolioSnapshot?: (args: {
+    env: Env;
+    householdId: string;
+  }) => Promise<Awaited<ReturnType<typeof getPortfolioSnapshot>>>;
+  requireViewerContext?: typeof requireViewerContext;
+  resolveHouseholdSelection?: typeof resolveHouseholdSelection;
+};
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -69,9 +97,13 @@ type ReadyLoaderData = {
     marketValueMinor: number;
     unrealizedGainMinor: number;
   };
+  householdId: string;
 };
 
-type LoaderData = { kind: "empty" } | ReadyLoaderData;
+type LoaderData =
+  | { householdId?: string; kind: "empty" }
+  | { kind: "error"; message: string; title: string }
+  | ReadyLoaderData;
 
 // ── Helpers ────────────────────────────────────────────────
 
@@ -177,36 +209,106 @@ export function meta(_: Route.MetaArgs) {
   ];
 }
 
-export function createPortfolioLoader(deps?: {
-  getPortfolioSnapshot?: typeof getPortfolioSnapshot;
-  requireViewerContext?: typeof requireViewerContext;
-}) {
+function buildLoaderErrorData(title: string, message: string) {
+  return {
+    kind: "error" as const,
+    message,
+    title,
+  };
+}
+
+export function createPortfolioLoader(deps: PortfolioLoaderDeps = {}) {
+  const requireViewer = deps.requireViewerContext ?? requireViewerContext;
+  const createHouseholdAccess =
+    deps.createHouseholdAccess ?? createD1HouseholdAccess;
+  const createHouseholdService =
+    deps.createHouseholdService ?? createD1HouseholdService;
   const loadPortfolioSnapshot =
-    deps?.getPortfolioSnapshot ?? getPortfolioSnapshot;
-  const requireViewer = deps?.requireViewerContext ?? requireViewerContext;
+    deps.loadPortfolioSnapshot ??
+    (deps.getPortfolioSnapshot
+      ? ({ env, householdId }: { env: Env; householdId: string }) => {
+          const getPortfolioSnapshot = deps.getPortfolioSnapshot;
+
+          if (!getPortfolioSnapshot) {
+            throw new Error("Portfolio snapshot loader is not configured.");
+          }
+
+          return getPortfolioSnapshot(getDb(env.DB), householdId);
+        }
+      : ({ env, householdId }: { env: Env; householdId: string }) =>
+          createWebRuntimeHouseholdService(env).getPortfolioSnapshot(
+            householdId,
+          ));
+  const resolveSelectedHousehold =
+    deps.resolveHouseholdSelection ?? resolveHouseholdSelection;
 
   return async function loader({ context, request }: Route.LoaderArgs) {
-    const viewer = await requireViewer({ context, request });
     const env = readCloudflareEnv(context);
-    const snapshot = await loadPortfolioSnapshot(
-      getDb(env.DB),
-      viewer.householdId,
-    );
 
-    if (!snapshot) {
-      return { kind: "empty" as const };
+    try {
+      if (
+        deps.createHouseholdAccess ||
+        deps.createHouseholdService ||
+        deps.resolveHouseholdSelection
+      ) {
+        const db = getDb(env.DB);
+        const household = await resolveSelectedHousehold(
+          createHouseholdAccess(db),
+          readRequestedHouseholdId(request),
+        );
+
+        if (!household) {
+          return { kind: "empty" as const };
+        }
+
+        const snapshot = await createHouseholdService(db).getPortfolioSnapshot(
+          household.id,
+        );
+
+        if (!snapshot) {
+          return { householdId: household.id, kind: "empty" as const };
+        }
+
+        return {
+          accounts: snapshot.accounts,
+          allocationBuckets: snapshot.allocationBuckets,
+          asOfDate: snapshot.asOfDate,
+          householdId: household.id,
+          householdName: snapshot.householdName,
+          kind: "ready" as const,
+          lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
+          topHoldings: snapshot.topHoldings,
+          totals: snapshot.totals,
+        };
+      }
+
+      const viewer = await requireViewer({ context, request });
+      const householdId = resolveViewerHouseholdId(request, viewer.householdId);
+      const snapshot = await loadPortfolioSnapshot({ env, householdId });
+
+      if (!snapshot) {
+        return { householdId, kind: "empty" as const };
+      }
+
+      return {
+        accounts: snapshot.accounts,
+        allocationBuckets: snapshot.allocationBuckets,
+        asOfDate: snapshot.asOfDate,
+        householdId,
+        householdName: snapshot.householdName,
+        kind: "ready" as const,
+        lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
+        topHoldings: snapshot.topHoldings,
+        totals: snapshot.totals,
+      };
+    } catch (error) {
+      return buildLoaderErrorData(
+        "Household selection required",
+        error instanceof Error
+          ? error.message
+          : "Household selection could not be resolved.",
+      );
     }
-
-    return {
-      accounts: snapshot.accounts,
-      allocationBuckets: snapshot.allocationBuckets,
-      asOfDate: snapshot.asOfDate,
-      householdName: snapshot.householdName,
-      kind: "ready" as const,
-      lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
-      topHoldings: snapshot.topHoldings,
-      totals: snapshot.totals,
-    };
   };
 }
 
@@ -218,6 +320,23 @@ export function PortfolioScreen({ loaderData }: { loaderData: LoaderData }) {
   const [searchValue, setSearchValue] = useState("");
   const deferredSearch = useDeferredValue(searchValue);
   const normalizedSearch = deferredSearch.trim().toLowerCase();
+
+  if (loaderData.kind === "error") {
+    return (
+      <DashboardShell activePath="/portfolio">
+        <div className="flex min-h-[70vh] items-center justify-center p-6">
+          <Card className="w-full max-w-md">
+            <CardContent className="space-y-3 p-6 text-center">
+              <p className="text-lg font-medium">{loaderData.title}</p>
+              <p className="text-sm text-muted-foreground">
+                {loaderData.message}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardShell>
+    );
+  }
   const filteredAccounts =
     loaderData.kind === "ready"
       ? filterPortfolioAccounts(loaderData.accounts, normalizedSearch)
@@ -259,7 +378,17 @@ export function PortfolioScreen({ loaderData }: { loaderData: LoaderData }) {
                 Connect Plaid to populate your portfolio view.
               </p>
               <div className="mt-6 flex gap-3">
-                <a href="/connect/plaid" className={buttonVariants()}>
+                <a
+                  href={
+                    loaderData.householdId
+                      ? buildHouseholdPath(
+                          "/connect/plaid",
+                          loaderData.householdId,
+                        )
+                      : "/connect/plaid"
+                  }
+                  className={buttonVariants()}
+                >
                   Connect Plaid
                 </a>
               </div>

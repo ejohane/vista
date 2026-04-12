@@ -4,7 +4,13 @@ import {
   type PlaidClient,
 } from "@vista/plaid";
 
+const DEFAULT_HOUSEHOLD_NAME = "Vista Household";
 const PLAID_REQUIRED_PRODUCTS = ["investments"] as const;
+const PLAID_REQUIRED_IF_SUPPORTED_PRODUCTS = [
+  "transactions",
+  "liabilities",
+] as const;
+const PLAID_TRANSACTIONS_DAYS_REQUESTED = 730;
 
 type CreatePlaidLinkTokenArgs = {
   client?: PlaidClient;
@@ -15,9 +21,11 @@ type CreatePlaidLinkTokenArgs = {
   }) => PlaidClient;
   clientId?: string;
   countryCodes?: string[];
+  createHouseholdId?: () => string;
   database: D1Database;
   environment?: "development" | "production" | "sandbox";
-  householdId: string;
+  householdId?: string;
+  householdName?: string;
   now?: Date;
   providerTokenEncryptionKey?: string;
   redirectUrl?: string;
@@ -32,15 +40,37 @@ type ExchangePlaidPublicTokenArgs = {
     secret: string;
   }) => PlaidClient;
   clientId?: string;
+  createHouseholdId?: () => string;
   database: D1Database;
   environment?: "development" | "production" | "sandbox";
-  householdId: string;
+  householdId?: string;
+  householdName?: string;
   institutionId?: string;
   institutionName?: string;
   now?: Date;
-  providerTokenEncryptionKey: string;
+  onConnectionPersisted?: (args: {
+    accessToken: string;
+    connectionId: string;
+    createdAt: Date;
+    externalConnectionId: string;
+    householdId: string;
+    institutionId: null | string;
+    institutionName: string;
+    plaidItemId: string;
+    updatedAt: Date;
+  }) => Promise<void>;
+  persistAccessTokenInDatabase?: boolean;
+  providerTokenEncryptionKey?: string;
   publicToken: string;
   secret?: string;
+};
+
+type HouseholdRow = {
+  id: string;
+};
+
+type HouseholdCountRow = {
+  count: number;
 };
 
 export type CreatedPlaidLinkToken = {
@@ -54,6 +84,103 @@ export type ExchangedPlaidConnection = {
   householdId: string;
   householdWasCreated: boolean;
 };
+
+function createGeneratedHouseholdId() {
+  return `household_${crypto.randomUUID()}`;
+}
+
+async function ensureHousehold(
+  database: D1Database,
+  now: Date,
+  args: {
+    createHouseholdId?: () => string;
+    householdId?: string;
+    householdName?: string;
+  },
+) {
+  const requestedHouseholdId = args.householdId?.trim();
+
+  if (requestedHouseholdId) {
+    const existingHousehold = await database
+      .prepare(
+        `
+          select id
+          from households
+          where id = ?
+          limit 1
+        `,
+      )
+      .bind(requestedHouseholdId)
+      .first<HouseholdRow>();
+
+    if (!existingHousehold) {
+      throw new Error(`Household ${requestedHouseholdId} could not be found.`);
+    }
+
+    return {
+      householdId: existingHousehold.id,
+      householdWasCreated: false,
+    };
+  }
+
+  const householdCount = await database
+    .prepare(
+      `
+        select count(*) as count
+        from households
+      `,
+    )
+    .first<HouseholdCountRow>();
+
+  const resolvedHouseholdCount = Number(householdCount?.count ?? 0);
+
+  if (resolvedHouseholdCount === 1) {
+    const existingHousehold = await database
+      .prepare(
+        `
+          select id
+          from households
+          order by created_at asc
+          limit 1
+        `,
+      )
+      .first<HouseholdRow>();
+
+    if (!existingHousehold) {
+      throw new Error("The household registry is out of sync.");
+    }
+
+    return {
+      householdId: existingHousehold.id,
+      householdWasCreated: false,
+    };
+  }
+
+  if (resolvedHouseholdCount > 1) {
+    throw new Error(
+      "Multiple households are available. Pass householdId explicitly.",
+    );
+  }
+
+  const householdId =
+    args.createHouseholdId?.() ?? createGeneratedHouseholdId();
+  const householdName = args.householdName?.trim() || DEFAULT_HOUSEHOLD_NAME;
+
+  await database
+    .prepare(
+      `
+        insert into households (id, name, last_synced_at, created_at)
+        values (?, ?, ?, ?)
+      `,
+    )
+    .bind(householdId, householdName, now.getTime(), now.getTime())
+    .run();
+
+  return {
+    householdId,
+    householdWasCreated: true,
+  };
+}
 
 function resolvePlaidClient(args: {
   client?: PlaidClient;
@@ -81,22 +208,34 @@ function resolvePlaidClient(args: {
 export async function createPlaidLinkToken(
   args: CreatePlaidLinkTokenArgs,
 ): Promise<CreatedPlaidLinkToken> {
+  const now = args.now ?? new Date();
   const client = resolvePlaidClient(args);
 
   if (!client) {
     throw new Error("Plaid client configuration is required.");
   }
 
+  const { householdId, householdWasCreated } = await ensureHousehold(
+    args.database,
+    now,
+    {
+      createHouseholdId: args.createHouseholdId,
+      householdId: args.householdId,
+      householdName: args.householdName,
+    },
+  );
   const result = await client.createLinkToken({
     countryCodes: args.countryCodes,
     products: [...PLAID_REQUIRED_PRODUCTS],
+    requiredIfSupportedProducts: [...PLAID_REQUIRED_IF_SUPPORTED_PRODUCTS],
     redirectUri: args.redirectUrl,
-    userId: args.householdId,
+    transactionsDaysRequested: PLAID_TRANSACTIONS_DAYS_REQUESTED,
+    userId: householdId,
   });
 
   return {
-    householdId: args.householdId,
-    householdWasCreated: false,
+    householdId,
+    householdWasCreated,
     linkToken: result.linkToken,
   };
 }
@@ -117,13 +256,33 @@ export async function exchangePlaidPublicToken(
     throw new Error("Plaid did not return a valid connection token.");
   }
 
+  const persistAccessTokenInDatabase =
+    args.persistAccessTokenInDatabase ?? true;
+
+  const { householdId, householdWasCreated } = await ensureHousehold(
+    args.database,
+    now,
+    {
+      createHouseholdId: args.createHouseholdId,
+      householdId: args.householdId,
+      householdName: args.householdName,
+    },
+  );
   const exchangeResult = await client.exchangePublicToken({
     publicToken,
   });
-  const encryptedAccessToken = await encryptProviderToken({
-    plaintext: exchangeResult.accessToken,
-    secret: args.providerTokenEncryptionKey,
-  });
+  const encryptedAccessToken = persistAccessTokenInDatabase
+    ? await encryptProviderToken({
+        plaintext: exchangeResult.accessToken,
+        secret:
+          args.providerTokenEncryptionKey ??
+          (() => {
+            throw new Error(
+              "Provider token encryption key is required to store Plaid credentials.",
+            );
+          })(),
+      })
+    : null;
   const connectionId = `conn:plaid:${exchangeResult.itemId}`;
   const institutionId = args.institutionId?.trim() || null;
   const institutionName = args.institutionName?.trim() || "Plaid";
@@ -161,13 +320,13 @@ export async function exchangePlaidPublicToken(
     )
     .bind(
       connectionId,
-      args.householdId,
+      householdId,
       "plaid",
       "active",
       exchangeResult.itemId,
       null,
       encryptedAccessToken,
-      1,
+      persistAccessTokenInDatabase ? 1 : null,
       exchangeResult.itemId,
       institutionId,
       institutionName,
@@ -176,9 +335,21 @@ export async function exchangePlaidPublicToken(
     )
     .run();
 
+  await args.onConnectionPersisted?.({
+    accessToken: exchangeResult.accessToken,
+    connectionId,
+    createdAt: now,
+    externalConnectionId: exchangeResult.itemId,
+    householdId,
+    institutionId,
+    institutionName,
+    plaidItemId: exchangeResult.itemId,
+    updatedAt: now,
+  });
+
   return {
     connectionId,
-    householdId: args.householdId,
-    householdWasCreated: false,
+    householdId,
+    householdWasCreated,
   };
 }

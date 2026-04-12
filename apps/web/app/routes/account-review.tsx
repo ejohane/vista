@@ -6,10 +6,15 @@ import {
 } from "@phosphor-icons/react";
 import {
   type AccountCurationSnapshot,
-  getAccountCurationSnapshot,
+  createD1HouseholdAccess,
+  createD1HouseholdService,
+  type getAccountCurationSnapshot,
   getDb,
+  type HouseholdAccess,
+  type HouseholdService,
   ownershipTypes,
-  updateAccountCuration,
+  resolveHouseholdSelection,
+  type updateAccountCuration,
 } from "@vista/db";
 import { useDeferredValue, useState } from "react";
 import { redirect, useFetcher } from "react-router";
@@ -20,9 +25,37 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { requireViewerContext } from "@/lib/auth";
 import { formatCompactUsd, formatUpdatedAt, formatUsd } from "@/lib/format";
+import {
+  buildHouseholdPath,
+  readRequestedHouseholdId,
+  resolveViewerHouseholdId,
+} from "@/lib/household-routing";
+import { createWebRuntimeHouseholdService } from "@/lib/runtime-household-service";
 import { readCloudflareEnv } from "@/lib/server-context";
 import { cn } from "@/lib/utils";
 import type { Route } from "./+types/account-review";
+
+type AccountReviewRouteDeps = {
+  createHouseholdAccess?: (db: ReturnType<typeof getDb>) => HouseholdAccess;
+  createHouseholdService?: (
+    db: ReturnType<typeof getDb>,
+  ) => Pick<
+    HouseholdService,
+    "getAccountCurationSnapshot" | "updateAccountCuration"
+  >;
+  getAccountCurationSnapshot?: typeof getAccountCurationSnapshot;
+  loadAccountCurationSnapshot?: (args: {
+    env: Env;
+    householdId: string;
+  }) => Promise<Awaited<ReturnType<typeof getAccountCurationSnapshot>>>;
+  requireViewerContext?: typeof requireViewerContext;
+  saveAccountCuration?: (args: {
+    env: Env;
+    update: Parameters<typeof updateAccountCuration>[1];
+  }) => Promise<unknown>;
+  updateAccountCuration?: typeof updateAccountCuration;
+  resolveHouseholdSelection?: typeof resolveHouseholdSelection;
+};
 
 /* ------------------------------------------------------------------ */
 /*  Constants & types                                                  */
@@ -435,49 +468,148 @@ export function meta(_: Route.MetaArgs) {
   ];
 }
 
-export function createAccountReviewLoader(deps?: {
-  getAccountCurationSnapshot?: typeof getAccountCurationSnapshot;
-  requireViewerContext?: typeof requireViewerContext;
-}) {
+export function createAccountReviewLoader(deps: AccountReviewRouteDeps = {}) {
+  const requireViewer = deps.requireViewerContext ?? requireViewerContext;
+  const createHouseholdAccess =
+    deps.createHouseholdAccess ?? createD1HouseholdAccess;
+  const createHouseholdService =
+    deps.createHouseholdService ?? createD1HouseholdService;
   const loadAccountCurationSnapshot =
-    deps?.getAccountCurationSnapshot ?? getAccountCurationSnapshot;
-  const requireViewer = deps?.requireViewerContext ?? requireViewerContext;
+    deps.loadAccountCurationSnapshot ??
+    (deps.getAccountCurationSnapshot
+      ? ({ env, householdId }: { env: Env; householdId: string }) => {
+          const getAccountCurationSnapshot = deps.getAccountCurationSnapshot;
+
+          if (!getAccountCurationSnapshot) {
+            throw new Error("Account curation loader is not configured.");
+          }
+
+          return getAccountCurationSnapshot(getDb(env.DB), householdId);
+        }
+      : ({ env, householdId }: { env: Env; householdId: string }) =>
+          createWebRuntimeHouseholdService(env).getAccountCurationSnapshot(
+            householdId,
+          ));
+  const resolveSelectedHousehold =
+    deps.resolveHouseholdSelection ?? resolveHouseholdSelection;
 
   return async function loader({ context, request }: Route.LoaderArgs) {
-    const viewer = await requireViewer({ context, request });
-    const env = readCloudflareEnv(context);
-    const snapshot = await loadAccountCurationSnapshot(
-      getDb(env.DB),
-      viewer.householdId,
-    );
     const updatedAccountId = new URL(request.url).searchParams.get("updated");
+    const env = readCloudflareEnv(context);
 
-    if (!snapshot) {
-      return { kind: "empty" as const, updatedAccountId };
+    try {
+      if (
+        deps.createHouseholdAccess ||
+        deps.createHouseholdService ||
+        deps.resolveHouseholdSelection
+      ) {
+        const db = getDb(env.DB);
+        const household = await resolveSelectedHousehold(
+          createHouseholdAccess(db),
+          readRequestedHouseholdId(request),
+        );
+
+        if (!household) {
+          return {
+            householdId: null,
+            kind: "empty" as const,
+            updatedAccountId,
+          };
+        }
+
+        const snapshot = await createHouseholdService(
+          db,
+        ).getAccountCurationSnapshot(household.id);
+
+        if (!snapshot) {
+          return {
+            householdId: household.id,
+            kind: "empty" as const,
+            updatedAccountId,
+          };
+        }
+
+        return {
+          accounts: snapshot.accounts,
+          householdId: household.id,
+          householdName: snapshot.householdName,
+          kind: "ready" as const,
+          lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
+          summary: snapshot.summary,
+          updatedAccountId,
+        };
+      }
+
+      const viewer = await requireViewer({ context, request });
+      const householdId = resolveViewerHouseholdId(request, viewer.householdId);
+      const snapshot = await loadAccountCurationSnapshot({ env, householdId });
+
+      if (!snapshot) {
+        return {
+          householdId,
+          kind: "empty" as const,
+          updatedAccountId,
+        };
+      }
+
+      return {
+        accounts: snapshot.accounts,
+        householdId,
+        householdName: snapshot.householdName,
+        kind: "ready" as const,
+        lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
+        summary: snapshot.summary,
+        updatedAccountId,
+      };
+    } catch (error) {
+      return {
+        kind: "error" as const,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Household selection could not be resolved.",
+        title: "Household selection required",
+      };
     }
-
-    return {
-      accounts: snapshot.accounts,
-      householdName: snapshot.householdName,
-      kind: "ready" as const,
-      lastSyncedAt: snapshot.lastSyncedAt.toISOString(),
-      summary: snapshot.summary,
-      updatedAccountId,
-    };
   };
 }
 
-export function createAccountReviewAction(deps?: {
-  requireViewerContext?: typeof requireViewerContext;
-  updateAccountCuration?: typeof updateAccountCuration;
-}) {
-  const requireViewer = deps?.requireViewerContext ?? requireViewerContext;
+export function createAccountReviewAction(deps: AccountReviewRouteDeps = {}) {
+  const requireViewer = deps.requireViewerContext ?? requireViewerContext;
+  const createHouseholdAccess =
+    deps.createHouseholdAccess ?? createD1HouseholdAccess;
+  const createHouseholdService =
+    deps.createHouseholdService ?? createD1HouseholdService;
   const saveAccountCuration =
-    deps?.updateAccountCuration ?? updateAccountCuration;
+    deps.saveAccountCuration ??
+    (deps.updateAccountCuration
+      ? ({
+          env,
+          update,
+        }: {
+          env: Env;
+          update: Parameters<typeof updateAccountCuration>[1];
+        }) => {
+          const updateAccountCuration = deps.updateAccountCuration;
+
+          if (!updateAccountCuration) {
+            throw new Error("Account curation updater is not configured.");
+          }
+
+          return updateAccountCuration(getDb(env.DB), update);
+        }
+      : ({
+          env,
+          update,
+        }: {
+          env: Env;
+          update: Parameters<typeof updateAccountCuration>[1];
+        }) =>
+          createWebRuntimeHouseholdService(env).updateAccountCuration(update));
+  const resolveSelectedHousehold =
+    deps.resolveHouseholdSelection ?? resolveHouseholdSelection;
 
   return async function action({ context, request }: Route.ActionArgs) {
-    const viewer = await requireViewer({ context, request });
-    const env = readCloudflareEnv(context);
     const formData = await request.formData();
     const accountId = formData.get("accountId");
     const displayName = formData.get("displayName");
@@ -502,26 +634,74 @@ export function createAccountReviewAction(deps?: {
       } satisfies ActionData;
     }
 
-    const resolvedOwnershipType = ownershipType as OwnershipOption;
-
     try {
-      await saveAccountCuration(getDb(env.DB), {
-        accountId,
-        displayName: typeof displayName === "string" ? displayName : null,
-        householdId: viewer.householdId,
-        includeInHouseholdReporting:
-          formData.get("includeInHouseholdReporting") === "on",
-        isHidden: formData.get("isHidden") === "on",
-        ownershipType: resolvedOwnershipType,
+      const env = readCloudflareEnv(context);
+
+      if (
+        deps.createHouseholdAccess ||
+        deps.createHouseholdService ||
+        deps.resolveHouseholdSelection
+      ) {
+        const db = getDb(env.DB);
+        const household = await resolveSelectedHousehold(
+          createHouseholdAccess(db),
+          readRequestedHouseholdId(request),
+        );
+
+        if (!household) {
+          throw new Error("No household is available for account curation.");
+        }
+
+        await createHouseholdService(db).updateAccountCuration({
+          accountId,
+          displayName: typeof displayName === "string" ? displayName : null,
+          householdId: household.id,
+          includeInHouseholdReporting:
+            formData.get("includeInHouseholdReporting") === "on",
+          isHidden: formData.get("isHidden") === "on",
+          ownershipType: ownershipType as OwnershipOption,
+        });
+
+        if (intent === "inline") {
+          return { accountId, ok: true as const };
+        }
+
+        const redirectUrl = new URL(
+          buildHouseholdPath("/accounts/review", household.id),
+          "http://localhost",
+        );
+        redirectUrl.searchParams.set("updated", accountId);
+
+        return redirect(`${redirectUrl.pathname}${redirectUrl.search}`);
+      }
+
+      const viewer = await requireViewer({ context, request });
+      const householdId = resolveViewerHouseholdId(request, viewer.householdId);
+
+      await saveAccountCuration({
+        env,
+        update: {
+          accountId,
+          displayName: typeof displayName === "string" ? displayName : null,
+          householdId,
+          includeInHouseholdReporting:
+            formData.get("includeInHouseholdReporting") === "on",
+          isHidden: formData.get("isHidden") === "on",
+          ownershipType: ownershipType as OwnershipOption,
+        },
       });
 
       if (intent === "inline") {
         return { accountId, ok: true as const };
       }
 
-      return redirect(
-        `/accounts/review?updated=${encodeURIComponent(accountId)}`,
+      const redirectUrl = new URL(
+        buildHouseholdPath("/accounts/review", householdId),
+        "http://localhost",
       );
+      redirectUrl.searchParams.set("updated", accountId);
+
+      return redirect(`${redirectUrl.pathname}${redirectUrl.search}`);
     } catch (error) {
       return {
         accountId,
@@ -553,6 +733,23 @@ export function AccountReviewScreen({
   const deferredSearch = useDeferredValue(searchValue);
   const normalizedSearch = deferredSearch.trim().toLowerCase();
 
+  if (loaderData.kind === "error") {
+    return (
+      <DashboardShell activePath="/accounts/review">
+        <div className="flex min-h-[70vh] items-center justify-center p-6">
+          <Card className="w-full max-w-md">
+            <CardContent className="space-y-3 p-6 text-center">
+              <p className="text-lg font-medium">{loaderData.title}</p>
+              <p className="text-sm text-muted-foreground">
+                {loaderData.message}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardShell>
+    );
+  }
+
   if (loaderData.kind !== "ready") {
     return (
       <DashboardShell activePath="/accounts/review">
@@ -570,10 +767,27 @@ export function AccountReviewScreen({
                 Connect a provider or seed local data first.
               </p>
               <div className="mt-6 flex gap-3">
-                <a href="/connect/plaid" className={buttonVariants()}>
+                <a
+                  href={
+                    loaderData.householdId
+                      ? buildHouseholdPath(
+                          "/connect/plaid",
+                          loaderData.householdId,
+                        )
+                      : "/connect/plaid"
+                  }
+                  className={buttonVariants()}
+                >
                   Connect Plaid
                 </a>
-                <a href="/" className={buttonVariants({ variant: "outline" })}>
+                <a
+                  href={
+                    loaderData.householdId
+                      ? buildHouseholdPath("/", loaderData.householdId)
+                      : "/"
+                  }
+                  className={buttonVariants({ variant: "outline" })}
+                >
                   Back to overview
                 </a>
               </div>

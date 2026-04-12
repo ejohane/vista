@@ -12,6 +12,9 @@ describe("Home route", () => {
       connectionStates: [],
       hasSuccessfulSync: false,
       history: [],
+      historyCoverageMode: null,
+      historyHasEstimatedPoints: false,
+      historyMode: "snapshot" as const,
       householdName: "My Household",
       lastSyncedAt: new Date("2026-04-11T14:00:00.000Z"),
       reportingGroups: [],
@@ -54,6 +57,10 @@ describe("Home route", () => {
       connectionStates: [],
       hasSuccessfulSync: false,
       history: [],
+      historyCoverageMode: null,
+      historyHasEstimatedPoints: false,
+      historyMode: "snapshot",
+      householdId: "household_viewer",
       householdName: "My Household",
       kind: "ready",
       lastSyncedAt: "2026-04-11T14:00:00.000Z",
@@ -87,18 +94,26 @@ describe("Home route", () => {
           {
             cashMinor: 4700000,
             completedAt: "2026-03-14T18:30:00.000Z",
+            coverageMode: "snapshot_only",
             investmentsMinor: 40000000,
+            isEstimated: false,
             liabilitiesMinor: -1200000,
             netWorthMinor: 43500000,
           },
           {
             cashMinor: 4812100,
             completedAt: "2026-03-16T18:30:00.000Z",
+            coverageMode: "snapshot_only",
             investmentsMinor: 40762210,
+            isEstimated: false,
             liabilitiesMinor: -1000000,
             netWorthMinor: 45574310,
           },
         ],
+        householdId: "household_demo",
+        historyCoverageMode: "snapshot_only",
+        historyHasEstimatedPoints: false,
+        historyMode: "snapshot",
         householdName: "Vista Household",
         kind: "ready",
         lastSyncedAt: "2026-03-16T18:30:00.000Z",
@@ -147,6 +162,7 @@ describe("Home route", () => {
     expect(html).toContain("Net Worth");
     expect(html).toContain("$455,743.10");
     expect(html).toContain("+$3,743.10");
+    expect(html).toContain("Historical trajectory across syncs");
     expect(html).toContain("Connections");
     expect(html).toContain("Portfolio");
     expect(html).toContain("Cash");
@@ -157,7 +173,8 @@ describe("Home route", () => {
     expect(html).toContain("Connected");
     expect(html).toContain("/accounts/review");
     expect(html).toContain("/portfolio");
-    expect(html).toContain("/connect/plaid");
+    expect(html).toContain("/connect/plaid?householdId=household_demo");
+    expect(html).toContain("/portfolio?householdId=household_demo");
   });
 
   test("renders chart pending copy when history has fewer than two points", () => {
@@ -179,11 +196,17 @@ describe("Home route", () => {
           {
             cashMinor: 4982340,
             completedAt: "2026-03-17T18:30:00.000Z",
+            coverageMode: "snapshot_only",
             investmentsMinor: 41060510,
+            isEstimated: false,
             liabilitiesMinor: -482000,
             netWorthMinor: 46042850,
           },
         ],
+        householdId: "household_demo",
+        historyCoverageMode: "snapshot_only",
+        historyHasEstimatedPoints: false,
+        historyMode: "snapshot",
         householdName: "Vista Household",
         kind: "ready",
         lastSyncedAt: "2026-03-17T18:30:00.000Z",
@@ -220,6 +243,10 @@ describe("Home route", () => {
         ],
         hasSuccessfulSync: false,
         history: [],
+        householdId: "household_demo",
+        historyCoverageMode: null,
+        historyHasEstimatedPoints: false,
+        historyMode: "snapshot",
         householdName: "Vista Household",
         kind: "ready",
         lastSyncedAt: "2026-03-15T18:30:00.000Z",
@@ -281,5 +308,60 @@ describe("Home route", () => {
       "Connect your first financial provider to build your household snapshot.",
     );
     expect(html).toContain("/connect/plaid");
+  });
+
+  test("renders backfilled history copy and partial-coverage messaging", () => {
+    const props = {
+      loaderData: {
+        changeSummary: null,
+        connectionStates: [],
+        hasSuccessfulSync: true,
+        history: [
+          {
+            cashMinor: 500000,
+            completedAt: "2026-03-14T00:00:00.000Z",
+            coverageMode: "mixed_snapshot_and_backfill",
+            investmentsMinor: 40000000,
+            isEstimated: false,
+            liabilitiesMinor: 0,
+            netWorthMinor: 40500000,
+          },
+          {
+            cashMinor: 500000,
+            completedAt: "2026-03-15T00:00:00.000Z",
+            coverageMode: "mixed_snapshot_and_backfill",
+            investmentsMinor: 40750000,
+            isEstimated: true,
+            liabilitiesMinor: 0,
+            netWorthMinor: 41250000,
+          },
+        ],
+        historyCoverageMode: "mixed_snapshot_and_backfill",
+        historyHasEstimatedPoints: true,
+        historyMode: "backfilled",
+        householdId: "household_demo",
+        householdName: "Vista Household",
+        kind: "ready",
+        lastSyncedAt: "2026-03-16T18:30:00.000Z",
+        reportingGroups: [],
+        totals: {
+          cashMinor: 500000,
+          investmentsMinor: 40750000,
+          netWorthMinor: 41250000,
+        },
+      },
+      matches: [],
+      params: {},
+    } as unknown as HomeProps;
+
+    const html = renderToStaticMarkup(<Home {...props} />);
+
+    expect(html).toContain(
+      "Backfilled from investment transactions and daily prices",
+    );
+    expect(html).toContain("Includes estimated pricing coverage");
+    expect(html).toContain("Cash and liabilities remain snapshot-backed");
+    expect(html).not.toContain("Chart available after multiple syncs");
+    expect(html).toContain("/portfolio?householdId=household_demo");
   });
 });
