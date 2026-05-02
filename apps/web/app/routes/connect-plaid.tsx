@@ -149,6 +149,12 @@ function buildPlaidRedirectUrl(args: {
   return url.toString();
 }
 
+function requiresProviderTokenEncryptionKey(
+  env: Env & Record<string, unknown>,
+) {
+  return readHouseholdStateMode(env) !== "state";
+}
+
 function clearPlaidOAuthState() {
   try {
     window.sessionStorage.removeItem(PLAID_OAUTH_TOKEN_STORAGE_KEY);
@@ -205,11 +211,20 @@ export function createConnectPlaidAction(deps?: {
       | "production"
       | "sandbox"
       | undefined;
+    const householdStateEnv = context.cloudflare.env as Env &
+      Record<string, unknown>;
+    const needsProviderTokenEncryptionKey =
+      requiresProviderTokenEncryptionKey(householdStateEnv);
 
-    if (!clientId || !secret || !providerTokenEncryptionKey) {
+    if (
+      !clientId ||
+      !secret ||
+      (needsProviderTokenEncryptionKey && !providerTokenEncryptionKey)
+    ) {
       return {
-        message:
-          "Set PLAID_CLIENT_ID, PLAID_SECRET, and PROVIDER_TOKEN_ENCRYPTION_KEY before starting Plaid onboarding.",
+        message: needsProviderTokenEncryptionKey
+          ? "Set PLAID_CLIENT_ID, PLAID_SECRET, and PROVIDER_TOKEN_ENCRYPTION_KEY before starting Plaid onboarding."
+          : "Set PLAID_CLIENT_ID and PLAID_SECRET before starting Plaid onboarding.",
         ok: false,
       } satisfies ActionData;
     }
@@ -238,8 +253,6 @@ export function createConnectPlaidAction(deps?: {
       } satisfies ActionData;
     }
 
-    const householdStateEnv = context.cloudflare.env as Env &
-      Record<string, unknown>;
     const stateMode = readHouseholdStateMode(householdStateEnv);
     const stateClient = createHouseholdStateClientFromEnv(householdStateEnv);
 
@@ -396,11 +409,20 @@ export function createConnectPlaidLoader(deps?: {
       env,
       "PLAID_REDIRECT_URI",
     );
+    const needsProviderTokenEncryptionKey = requiresProviderTokenEncryptionKey(
+      env as Env & Record<string, unknown>,
+    );
 
-    if (!clientId || !secret || !providerTokenEncryptionKey) {
+    if (
+      !clientId ||
+      !secret ||
+      (needsProviderTokenEncryptionKey && !providerTokenEncryptionKey)
+    ) {
       return buildLoaderErrorData(
         "Plaid is not configured",
-        "Set PLAID_CLIENT_ID, PLAID_SECRET, and PROVIDER_TOKEN_ENCRYPTION_KEY before launching Plaid Link.",
+        needsProviderTokenEncryptionKey
+          ? "Set PLAID_CLIENT_ID, PLAID_SECRET, and PROVIDER_TOKEN_ENCRYPTION_KEY before launching Plaid Link."
+          : "Set PLAID_CLIENT_ID and PLAID_SECRET before launching Plaid Link.",
       );
     }
 
@@ -456,8 +478,8 @@ export default function ConnectPlaid() {
     "failed" | "idle" | "loading" | "ready"
   >(loaderData.kind === "ready" ? "loading" : "idle");
   const [linkError, setLinkError] = useState<null | string>(null);
+  const [isPlaidScriptReady, setIsPlaidScriptReady] = useState(false);
   const handlerRef = useRef<null | PlaidLinkHandler>(null);
-  const hasAutoOpenedRef = useRef(false);
   const isSubmitting = navigation.state === "submitting";
   const [oauthRedirectUri, setOauthRedirectUri] = useState<null | string>(null);
   const [oauthResumeToken, setOauthResumeToken] = useState<null | string>(null);
@@ -490,21 +512,23 @@ export default function ConnectPlaid() {
     }
 
     if (window.Plaid) {
-      setLinkState("ready");
+      setIsPlaidScriptReady(true);
       return;
     }
 
-    const existingScript = document.querySelector<HTMLScriptElement>(
+    const staleScript = document.querySelector<HTMLScriptElement>(
       'script[data-plaid-link="true"]',
     );
-    const script = existingScript ?? document.createElement("script");
+    staleScript?.remove();
+
+    const script = document.createElement("script");
 
     script.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
     script.async = true;
     script.dataset.plaidLink = "true";
 
     function handleLoad() {
-      setLinkState("ready");
+      setIsPlaidScriptReady(true);
     }
 
     function handleError() {
@@ -517,9 +541,7 @@ export default function ConnectPlaid() {
     script.addEventListener("load", handleLoad);
     script.addEventListener("error", handleError);
 
-    if (!existingScript) {
-      document.body.appendChild(script);
-    }
+    document.body.appendChild(script);
 
     return () => {
       script.removeEventListener("load", handleLoad);
@@ -530,110 +552,109 @@ export default function ConnectPlaid() {
   useEffect(() => {
     if (
       loaderData.kind !== "ready" ||
-      linkState !== "ready" ||
+      !isPlaidScriptReady ||
       handlerRef.current ||
       !window.Plaid
     ) {
       return;
     }
 
-    handlerRef.current = window.Plaid.create({
-      onEvent(eventName, metadata) {
-        if (
-          eventName === "ERROR" ||
-          eventName === "FAIL_OAUTH" ||
-          eventName === "CLOSE_OAUTH"
-        ) {
-          console.error("Plaid Link event", {
-            errorCode: metadata.error_code ?? null,
-            errorMessage: metadata.error_message ?? null,
-            errorType: metadata.error_type ?? null,
-            eventName,
-            institutionId: metadata.institution_id ?? null,
-            institutionName: metadata.institution_name ?? null,
-            linkSessionId: metadata.link_session_id ?? null,
-            requestId: metadata.request_id ?? null,
-          });
-        }
-      },
-      onExit(error, metadata) {
-        if (error?.display_message || error?.error_message) {
-          const requestIdSuffix = metadata.request_id
-            ? ` Request ID: ${metadata.request_id}.`
-            : "";
+    try {
+      handlerRef.current = window.Plaid.create({
+        onEvent(eventName, metadata) {
+          if (
+            eventName === "ERROR" ||
+            eventName === "FAIL_OAUTH" ||
+            eventName === "CLOSE_OAUTH"
+          ) {
+            console.error("Plaid Link event", {
+              errorCode: metadata.error_code ?? null,
+              errorMessage: metadata.error_message ?? null,
+              errorType: metadata.error_type ?? null,
+              eventName,
+              institutionId: metadata.institution_id ?? null,
+              institutionName: metadata.institution_name ?? null,
+              linkSessionId: metadata.link_session_id ?? null,
+              requestId: metadata.request_id ?? null,
+            });
+          }
+        },
+        onExit(error, metadata) {
+          if (error?.display_message || error?.error_message) {
+            const requestIdSuffix = metadata.request_id
+              ? ` Request ID: ${metadata.request_id}.`
+              : "";
 
-          setLinkError(
-            `${error.display_message ?? error.error_message ?? "Plaid exited with an error."}${requestIdSuffix}`,
-          );
-          console.error("Plaid Link exit", {
-            errorCode: error.error_code ?? null,
-            errorMessage: error.error_message ?? null,
-            errorType: error.error_type ?? null,
-            institutionId: metadata.institution?.institution_id ?? null,
-            institutionName: metadata.institution?.name ?? null,
-            linkSessionId: metadata.link_session_id ?? null,
-            requestId: metadata.request_id ?? null,
-            status: metadata.status ?? null,
-          });
-        }
+            setLinkError(
+              `${error.display_message ?? error.error_message ?? "Plaid exited with an error."}${requestIdSuffix}`,
+            );
+            console.error("Plaid Link exit", {
+              errorCode: error.error_code ?? null,
+              errorMessage: error.error_message ?? null,
+              errorType: error.error_type ?? null,
+              institutionId: metadata.institution?.institution_id ?? null,
+              institutionName: metadata.institution?.name ?? null,
+              linkSessionId: metadata.link_session_id ?? null,
+              requestId: metadata.request_id ?? null,
+              status: metadata.status ?? null,
+            });
+          }
 
-        clearPlaidOAuthState();
-        setOauthRedirectUri(null);
-        setOauthResumeToken(null);
-      },
-      onSuccess(publicToken, metadata) {
-        clearPlaidOAuthState();
-        setOauthRedirectUri(null);
-        setOauthResumeToken(null);
-        setLinkError(null);
-        const formData = new FormData();
-        formData.set("publicToken", publicToken);
+          clearPlaidOAuthState();
+          setOauthRedirectUri(null);
+          setOauthResumeToken(null);
+        },
+        onSuccess(publicToken, metadata) {
+          clearPlaidOAuthState();
+          setOauthRedirectUri(null);
+          setOauthResumeToken(null);
+          setLinkError(null);
+          const formData = new FormData();
+          formData.set("publicToken", publicToken);
 
-        if (loaderData.kind === "ready") {
-          formData.set("householdId", loaderData.householdId);
-        }
+          if (loaderData.kind === "ready") {
+            formData.set("householdId", loaderData.householdId);
+          }
 
-        const institutionId = metadata.institution?.institution_id?.trim();
-        const institutionName = metadata.institution?.name?.trim();
+          const institutionId = metadata.institution?.institution_id?.trim();
+          const institutionName = metadata.institution?.name?.trim();
 
-        if (institutionId) {
-          formData.set("institutionId", institutionId);
-        }
+          if (institutionId) {
+            formData.set("institutionId", institutionId);
+          }
 
-        if (institutionName) {
-          formData.set("institutionName", institutionName);
-        }
+          if (institutionName) {
+            formData.set("institutionName", institutionName);
+          }
 
-        submit(formData, { method: "post" });
-      },
-      receivedRedirectUri: oauthRedirectUri ?? undefined,
-      token: oauthResumeToken ?? loaderData.linkToken,
-    });
+          submit(formData, { method: "post" });
+        },
+        receivedRedirectUri: oauthRedirectUri ?? undefined,
+        token: oauthResumeToken ?? loaderData.linkToken,
+      });
+      setLinkState("ready");
+    } catch (error) {
+      const reason =
+        error instanceof Error
+          ? error.message
+          : "Plaid Link could not be initialized.";
+
+      setLinkState("failed");
+      setLinkError(reason);
+      console.error("Plaid Link initialization failed.", { error: reason });
+    }
 
     return () => {
       handlerRef.current?.destroy();
       handlerRef.current = null;
     };
-  }, [loaderData, linkState, oauthRedirectUri, oauthResumeToken, submit]);
-
-  useEffect(() => {
-    if (
-      loaderData.kind !== "ready" ||
-      linkState !== "ready" ||
-      !handlerRef.current ||
-      hasAutoOpenedRef.current
-    ) {
-      return;
-    }
-
-    hasAutoOpenedRef.current = true;
-
-    if (!oauthRedirectUri) {
-      persistPlaidOAuthToken(loaderData.linkToken);
-    }
-
-    handlerRef.current.open();
-  }, [loaderData, linkState, oauthRedirectUri]);
+  }, [
+    loaderData,
+    isPlaidScriptReady,
+    oauthRedirectUri,
+    oauthResumeToken,
+    submit,
+  ]);
 
   function openPlaidLink() {
     setLinkError(null);
@@ -642,7 +663,15 @@ export default function ConnectPlaid() {
       persistPlaidOAuthToken(loaderData.linkToken);
     }
 
-    handlerRef.current?.open();
+    if (!handlerRef.current) {
+      setLinkState("failed");
+      setLinkError(
+        "Plaid Link is not ready yet. Refresh the page and try again.",
+      );
+      return;
+    }
+
+    handlerRef.current.open();
   }
 
   return (

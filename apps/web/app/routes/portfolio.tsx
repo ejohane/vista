@@ -32,6 +32,7 @@ import {
   readRequestedHouseholdId,
   resolveViewerHouseholdId,
 } from "@/lib/household-routing";
+import { rethrowRouteResponse } from "@/lib/redirects";
 import { createWebRuntimeHouseholdService } from "@/lib/runtime-household-service";
 import { readCloudflareEnv } from "@/lib/server-context";
 import { cn } from "@/lib/utils";
@@ -302,6 +303,8 @@ export function createPortfolioLoader(deps: PortfolioLoaderDeps = {}) {
         totals: snapshot.totals,
       };
     } catch (error) {
+      rethrowRouteResponse(error);
+
       return buildLoaderErrorData(
         "Household selection required",
         error instanceof Error

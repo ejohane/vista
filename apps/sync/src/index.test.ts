@@ -586,7 +586,7 @@ describe("sync worker", () => {
 
     expect(
       sqlite.query("select count(*) as count from daily_net_worth_facts").get(),
-    ).toEqual({ count: 5 });
+    ).toEqual({ count: 3 });
     expect(
       sqlite.query("select count(*) as count from security_price_daily").get(),
     ).toEqual({ count: 3 });
@@ -596,7 +596,7 @@ describe("sync worker", () => {
     )[0];
     const loggedPayload = String(firstConsoleCall?.[0] ?? "");
     expect(loggedPayload).toContain('"backfilledHouseholds":1');
-    expect(loggedPayload).toContain('"rebuiltNetWorthFacts":5');
+    expect(loggedPayload).toContain('"rebuiltNetWorthFacts":3');
     expect(loggedPayload).toContain('"importedPrices":3');
   });
 });

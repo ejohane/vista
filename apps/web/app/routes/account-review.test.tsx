@@ -168,6 +168,37 @@ function buildActionRequest() {
 }
 
 describe("account review route", () => {
+  test("redirects anonymous visitors to sign in", async () => {
+    const loader = createAccountReviewLoader({
+      getAccountCurationSnapshot: mock(async () => {
+        throw new Error("getAccountCurationSnapshot should not be called");
+      }),
+      requireViewerContext: mock(async () => {
+        throw new Response(null, {
+          headers: {
+            Location: "/sign-in?redirect_url=%2Faccounts%2Freview",
+          },
+          status: 302,
+        });
+      }),
+    });
+
+    await expect(
+      loader({
+        context: {
+          cloudflare: {
+            env: {
+              DB: {} as D1Database,
+            },
+          },
+        },
+        request: new Request("http://localhost/accounts/review"),
+      } as never),
+    ).rejects.toMatchObject({
+      status: 302,
+    });
+  });
+
   test("loads account curation for the authenticated household", async () => {
     const getAccountCurationSnapshotMock = mock(async () => ({
       accounts: [],

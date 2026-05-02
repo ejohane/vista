@@ -30,6 +30,7 @@ import {
   readRequestedHouseholdId,
   resolveViewerHouseholdId,
 } from "@/lib/household-routing";
+import { rethrowRouteResponse } from "@/lib/redirects";
 import { createWebRuntimeHouseholdService } from "@/lib/runtime-household-service";
 import { readCloudflareEnv } from "@/lib/server-context";
 import { cn } from "@/lib/utils";
@@ -562,6 +563,8 @@ export function createAccountReviewLoader(deps: AccountReviewRouteDeps = {}) {
         updatedAccountId,
       };
     } catch (error) {
+      rethrowRouteResponse(error);
+
       return {
         kind: "error" as const,
         message:
@@ -703,6 +706,8 @@ export function createAccountReviewAction(deps: AccountReviewRouteDeps = {}) {
 
       return redirect(`${redirectUrl.pathname}${redirectUrl.search}`);
     } catch (error) {
+      rethrowRouteResponse(error);
+
       return {
         accountId,
         message:

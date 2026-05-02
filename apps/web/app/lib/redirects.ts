@@ -9,3 +9,9 @@ export function normalizeAppRedirectUrl(value: null | string | undefined) {
 
   return value;
 }
+
+export function rethrowRouteResponse(error: unknown) {
+  if (error instanceof Response) {
+    throw error;
+  }
+}
