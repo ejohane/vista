@@ -60,6 +60,58 @@ describe("connect plaid route loader", () => {
     );
   });
 
+  test("does not require provider token encryption when household state owns provider credentials", async () => {
+    const createLinkTokenMock = mock(async () => {
+      return {
+        householdId: "household_demo",
+        householdWasCreated: false,
+        linkToken: "link-sandbox-state-101",
+      };
+    });
+    const loader = createConnectPlaidLoader({
+      createPlaidLinkToken: createLinkTokenMock,
+      requireViewerContext: mock(async () => ({
+        clerkUserId: "user_123",
+        householdId: "household_demo",
+        householdName: "My Household",
+        memberId: "member_viewer",
+        memberRole: "owner" as const,
+      })),
+    });
+
+    const result = await loader({
+      context: {
+        cloudflare: {
+          env: {
+            DB: {} as D1Database,
+            PLAID_CLIENT_ID: "client-demo",
+            PLAID_ENV: "sandbox",
+            PLAID_SECRET: "secret-demo",
+            STATE_SERVICE: {
+              fetch: mock(async () => Response.json({ initialized: true })),
+            },
+          },
+        },
+      },
+      request: new Request(
+        "http://localhost/connect/plaid?householdId=household_demo",
+      ),
+    } as never);
+
+    expect(result).toEqual({
+      householdId: "household_demo",
+      kind: "ready",
+      linkToken: "link-sandbox-state-101",
+    });
+    expect(createLinkTokenMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: "client-demo",
+        householdId: "household_demo",
+        secret: "secret-demo",
+      }),
+    );
+  });
+
   test("passes a redirect url for https Plaid OAuth flows", async () => {
     const createLinkTokenMock = mock(async () => {
       return {
@@ -265,6 +317,74 @@ describe("connect plaid route action", () => {
         secret: "secret-demo",
       }),
     );
+  });
+
+  test("exchanges and syncs through household state without a provider token encryption key", async () => {
+    const exchangeMock = mock(async () => {
+      return {
+        connectionId: "conn:plaid:item-demo-state-101",
+        householdId: "household_demo",
+        householdWasCreated: false,
+      };
+    });
+    const stateFetchMock = mock(async () =>
+      Response.json({
+        recordsChanged: 3,
+        runId: "sync:plaid:demo-state-101",
+        status: "succeeded",
+      }),
+    );
+    const action = createConnectPlaidAction({
+      exchangePlaidPublicToken: exchangeMock,
+      requireViewerContext: mock(async () => ({
+        clerkUserId: "user_123",
+        householdId: "household_demo",
+        householdName: "My Household",
+        memberId: "member_viewer",
+        memberRole: "owner" as const,
+      })),
+      syncPlaidConnection: mock(async () => {
+        throw new Error("legacy sync should not be called in state mode");
+      }),
+    });
+    const formData = new FormData();
+    formData.set("householdId", "household_demo");
+    formData.set("publicToken", "public-sandbox-101");
+
+    const response = (await action({
+      context: {
+        cloudflare: {
+          env: {
+            DB: {} as D1Database,
+            PLAID_CLIENT_ID: "client-demo",
+            PLAID_ENV: "sandbox",
+            PLAID_SECRET: "secret-demo",
+            STATE_SERVICE: {
+              fetch: stateFetchMock,
+            },
+          },
+        },
+      },
+      request: new Request(
+        "http://localhost/connect/plaid?householdId=household_demo",
+        {
+          body: formData,
+          method: "POST",
+        },
+      ),
+    } as never)) as Response;
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe(
+      "/?householdId=household_demo",
+    );
+    expect(exchangeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        persistAccessTokenInDatabase: false,
+        providerTokenEncryptionKey: undefined,
+      }),
+    );
+    expect(stateFetchMock).toHaveBeenCalled();
   });
 
   test("returns an actionable error when Plaid credentials are missing", async () => {

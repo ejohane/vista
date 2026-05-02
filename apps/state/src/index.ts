@@ -1,4 +1,4 @@
-import { HouseholdState } from "./household-state";
+import { decodePathSegment, HouseholdState } from "./household-state";
 
 function readHealthPayload(request: Request) {
   return {
@@ -24,7 +24,14 @@ export default {
       return new Response("Household path is required.", { status: 404 });
     }
 
-    const householdId = segments[1];
+    let householdId: string;
+
+    try {
+      householdId = decodePathSegment(segments[1]);
+    } catch {
+      return new Response("Household id is malformed.", { status: 400 });
+    }
+
     const stub = env.HOUSEHOLD_STATE.get(
       env.HOUSEHOLD_STATE.idFromName(householdId),
     );

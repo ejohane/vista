@@ -4,6 +4,37 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createPortfolioLoader, PortfolioScreen } from "./portfolio";
 
 describe("portfolio route", () => {
+  test("redirects anonymous visitors to sign in", async () => {
+    const loader = createPortfolioLoader({
+      getPortfolioSnapshot: mock(async () => {
+        throw new Error("getPortfolioSnapshot should not be called");
+      }),
+      requireViewerContext: mock(async () => {
+        throw new Response(null, {
+          headers: {
+            Location: "/sign-in?redirect_url=%2Fportfolio",
+          },
+          status: 302,
+        });
+      }),
+    });
+
+    await expect(
+      loader({
+        context: {
+          cloudflare: {
+            env: {
+              DB: {} as D1Database,
+            },
+          },
+        },
+        request: new Request("http://localhost/portfolio"),
+      } as never),
+    ).rejects.toMatchObject({
+      status: 302,
+    });
+  });
+
   test("loads the portfolio for the authenticated household", async () => {
     const getPortfolioSnapshotMock = mock(async () => ({
       accounts: [],

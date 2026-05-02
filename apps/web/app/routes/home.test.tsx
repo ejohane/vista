@@ -6,6 +6,37 @@ import Home, { createHomeLoader } from "./home";
 type HomeProps = Parameters<typeof Home>[0];
 
 describe("Home route", () => {
+  test("redirects anonymous visitors to sign in", async () => {
+    const loader = createHomeLoader({
+      getHomepageSnapshot: mock(async () => {
+        throw new Error("getHomepageSnapshot should not be called");
+      }),
+      requireViewerContext: mock(async () => {
+        throw new Response(null, {
+          headers: {
+            Location: "/sign-in?redirect_url=%2F",
+          },
+          status: 302,
+        });
+      }),
+    });
+
+    await expect(
+      loader({
+        context: {
+          cloudflare: {
+            env: {
+              DB: {} as D1Database,
+            },
+          },
+        },
+        request: new Request("http://localhost/"),
+      } as never),
+    ).rejects.toMatchObject({
+      status: 302,
+    });
+  });
+
   test("loads the homepage snapshot for the authenticated household", async () => {
     const getHomepageSnapshotMock = mock(async () => ({
       changeSummary: null,

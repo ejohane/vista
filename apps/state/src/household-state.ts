@@ -32,6 +32,10 @@ function readOptionalEnvString(
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+export function decodePathSegment(segment: string) {
+  return decodeURIComponent(segment);
+}
+
 export class HouseholdState {
   private readonly database: D1Database & { sync?: () => Promise<void> };
   private readonly env: Env;
@@ -46,11 +50,19 @@ export class HouseholdState {
   async fetch(request: Request) {
     const url = new URL(request.url);
     const segments = url.pathname.split("/").filter(Boolean);
-    const householdId = segments[1];
     const route = `/${segments.slice(2).join("/")}`;
+    const encodedHouseholdId = segments[1];
 
-    if (!householdId) {
+    if (!encodedHouseholdId) {
       return new Response("Household id is required.", { status: 400 });
+    }
+
+    let householdId: string;
+
+    try {
+      householdId = decodePathSegment(encodedHouseholdId);
+    } catch {
+      return new Response("Household id is malformed.", { status: 400 });
     }
 
     if (route === "/status" && request.method === "GET") {
@@ -209,10 +221,18 @@ export class HouseholdState {
       route.endsWith("/sync") &&
       request.method === "POST"
     ) {
-      const connectionId = segments[3];
+      const encodedConnectionId = segments[3];
 
-      if (!connectionId) {
+      if (!encodedConnectionId) {
         return new Response("Connection id is required.", { status: 400 });
+      }
+
+      let connectionId: string;
+
+      try {
+        connectionId = decodePathSegment(encodedConnectionId);
+      } catch {
+        return new Response("Connection id is malformed.", { status: 400 });
       }
 
       const body = (await request.json()) as {

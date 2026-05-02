@@ -1375,7 +1375,7 @@ async function upsertPlaidHolding(args: {
           args.holding.institution_price_datetime,
           args.now.getTime(),
         ),
-        args.now.toISOString().slice(0, 10),
+        priceDate,
         normalizeHoldingQuantity(args.holding.quantity),
         toMinorUnits(args.holding.institution_price),
         toMinorUnits(args.holding.institution_value),
