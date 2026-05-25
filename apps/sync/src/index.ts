@@ -209,7 +209,9 @@ export default {
   },
 
   async scheduled(event, env) {
-    const now = new Date();
+    const now = event.scheduledTime
+      ? new Date(event.scheduledTime)
+      : new Date();
     const mode = readHouseholdStateMode(env as Env & Record<string, unknown>);
     const hasConfiguredConnections = await hasConfiguredProviderConnection(env);
     const hasSeedData = await hasLocalSeedData(env);

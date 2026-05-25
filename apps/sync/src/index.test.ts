@@ -570,7 +570,10 @@ describe("sync worker", () => {
 
     try {
       await worker.scheduled(
-        { cron: "0 13 * * *" } as ScheduledEvent,
+        {
+          cron: "0 13 * * *",
+          scheduledTime: Date.parse("2026-04-12T13:00:00.000Z"),
+        } as ScheduledEvent,
         {
           ALPHA_VANTAGE_API_KEY: "alpha-demo",
           DB: d1,
