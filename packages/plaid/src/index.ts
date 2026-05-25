@@ -142,6 +142,11 @@ type PlaidSyncConfiguredConnectionsArgs = {
 export type PlaidClient = {
   createLinkToken(args: {
     countryCodes?: string[];
+    hostedLink?: {
+      completionRedirectUri?: string;
+      isMobileApp?: boolean;
+      urlLifetimeSeconds?: number;
+    };
     language?: string;
     products: string[];
     requiredIfSupportedProducts?: string[];
@@ -150,11 +155,24 @@ export type PlaidClient = {
     userId: string;
   }): Promise<{
     expiration: string;
+    hostedLinkUrl?: string;
     linkToken: string;
   }>;
   exchangePublicToken(args: { publicToken: string }): Promise<{
     accessToken: string;
     itemId: string;
+  }>;
+  getLinkToken?(args: { linkToken: string }): Promise<{
+    linkSessions: Array<{
+      finishedAt: null | string;
+      itemAddResults: Array<{
+        institutionId: null | string;
+        institutionName: null | string;
+        publicToken: string;
+      }>;
+      publicTokens: string[];
+      startedAt: string;
+    }>;
   }>;
   getAccounts(args: { accessToken: string }): Promise<{
     accounts: PlaidApiAccount[];
@@ -519,6 +537,7 @@ export function createPlaidClient(
     async createLinkToken(args) {
       const response = await requestPlaid<{
         expiration: string;
+        hosted_link_url?: string;
         link_token: string;
       }>({
         baseUrl,
@@ -529,6 +548,13 @@ export function createPlaidClient(
           products: args.products,
           required_if_supported_products: args.requiredIfSupportedProducts,
           redirect_uri: args.redirectUri,
+          hosted_link: args.hostedLink
+            ? {
+                completion_redirect_uri: args.hostedLink.completionRedirectUri,
+                is_mobile_app: args.hostedLink.isMobileApp ?? false,
+                url_lifetime_seconds: args.hostedLink.urlLifetimeSeconds,
+              }
+            : undefined,
           transactions: args.transactionsDaysRequested
             ? {
                 days_requested: args.transactionsDaysRequested,
@@ -546,7 +572,64 @@ export function createPlaidClient(
 
       return {
         expiration: response.expiration,
+        hostedLinkUrl: response.hosted_link_url,
         linkToken: response.link_token,
+      };
+    },
+
+    async getLinkToken(args) {
+      const response = await requestPlaid<{
+        link_sessions?: Array<{
+          finished_at?: null | string;
+          on_success?: null | {
+            public_token?: string;
+          };
+          results?: null | {
+            item_add_results?: Array<{
+              institution?: null | {
+                institution_id?: null | string;
+                name?: null | string;
+              };
+              public_token?: string;
+            }>;
+          };
+          started_at: string;
+        }>;
+      }>({
+        baseUrl,
+        body: {
+          link_token: args.linkToken,
+        },
+        clientId: config.clientId,
+        fetchImpl,
+        path: "/link/token/get",
+        secret: config.secret,
+      });
+
+      return {
+        linkSessions: (response.link_sessions ?? []).map((session) => {
+          const itemAddResults =
+            session.results?.item_add_results
+              ?.filter((result) => Boolean(result.public_token))
+              .map((result) => ({
+                institutionId: result.institution?.institution_id ?? null,
+                institutionName: result.institution?.name ?? null,
+                publicToken: result.public_token as string,
+              })) ?? [];
+          const itemAddTokens = itemAddResults.map(
+            (result) => result.publicToken,
+          );
+          const onSuccessToken = session.on_success?.public_token;
+
+          return {
+            finishedAt: session.finished_at ?? null,
+            itemAddResults,
+            publicTokens: onSuccessToken
+              ? [onSuccessToken, ...itemAddTokens]
+              : itemAddTokens,
+            startedAt: session.started_at,
+          };
+        }),
       };
     },
 
