@@ -15,6 +15,10 @@
       {
         "assets": [
           {
+            "path": "dist/cli/install.sh",
+            "label": "Vista CLI curl installer"
+          },
+          {
             "path": "dist/cli/manifest.json",
             "label": "Vista CLI release manifest"
           },
