@@ -84,3 +84,14 @@ to replace `bun run cli` source executions.
 
 If the repository or release assets are private, set `GITHUB_TOKEN` or `GH_TOKEN`
 in the shell before running `vista version --check` or `vista upgrade`.
+
+## Codex Skill
+
+Install the bundled Vista CLI skill for local agents:
+
+```sh
+vista skill install
+```
+
+This writes `vista-cli/SKILL.md` under `$CODEX_HOME/skills` or
+`~/.codex/skills`.
