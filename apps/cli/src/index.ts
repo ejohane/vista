@@ -12,6 +12,7 @@ import {
 import { connectPlaid, parseConnectPlaidArgs } from "./connect-plaid";
 import { printDashboard } from "./dashboard";
 import { listHoldings, printHoldings } from "./holdings";
+import { parseIncomeArgs, printIncomeHelp, runIncomeCommand } from "./income";
 import { openLocalD1Database } from "./local-d1";
 import { ensureLocalSchema } from "./schema";
 import {
@@ -46,6 +47,8 @@ Usage:
   vista accounts
   vista holdings
   vista transactions [--limit 25]
+  vista income set --person "Erik" --source "Employer" --salary 150000 [--bonus 25000]
+  vista income show [--person "Erik"]
 
 Local files:
   Config: ${CONFIG_PATH}
@@ -218,6 +221,24 @@ async function run(argv: string[]) {
 
     await withDatabase(config.databasePath, async (database) => {
       printTransactions(await listTransactions(database, options), options);
+    });
+    return;
+  }
+
+  if (command === "income") {
+    if (!subcommand || subcommand === "help" || subcommand === "--help") {
+      printIncomeHelp();
+      return;
+    }
+
+    initializeCliConfig();
+    const config = loadCliConfig();
+
+    await withDatabase(config.databasePath, async (database) => {
+      await runIncomeCommand(
+        database,
+        parseIncomeArgs([subcommand, ...rest].filter(Boolean)),
+      );
     });
     return;
   }
