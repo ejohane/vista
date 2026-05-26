@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -45,6 +46,8 @@ const targets: ReleaseTarget[] = [
 
 const outDir = "dist/cli";
 const repository = "ejohane/vista";
+const installerSourcePath = "scripts/install-cli.sh";
+const installerAssetName = "install.sh";
 
 function sha256(path: string) {
   const digest = new Bun.CryptoHasher("sha256")
@@ -56,6 +59,8 @@ function sha256(path: string) {
 
 rmSync(outDir, { force: true, recursive: true });
 mkdirSync(outDir, { recursive: true });
+copyFileSync(installerSourcePath, join(outDir, installerAssetName));
+chmodSync(join(outDir, installerAssetName), 0o755);
 
 for (const target of targets) {
   const targetDir = join(outDir, target.bunTarget);
@@ -96,6 +101,7 @@ writeFileSync(
   `${JSON.stringify(
     {
       assets: targets.map((target) => target.assetName),
+      installer: installerAssetName,
       repository,
       version,
     },

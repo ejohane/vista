@@ -33,12 +33,41 @@ If conventional commits since the previous tag require a release,
 
 The release currently publishes:
 
+- `install.sh`
 - `vista-bun-darwin-arm64.tar.gz`
 - `vista-bun-darwin-x64.tar.gz`
 - `vista-bun-linux-arm64.tar.gz`
 - `vista-bun-linux-x64-baseline.tar.gz`
 - matching `.sha256` checksum files
 - `manifest.json`
+
+## Install Command
+
+Install the latest Vista CLI release:
+
+```sh
+curl -fsSL https://github.com/ejohane/vista/releases/latest/download/install.sh | sh
+```
+
+The installer writes to `~/.local/bin/vista` by default. To install somewhere
+else:
+
+```sh
+curl -fsSL https://github.com/ejohane/vista/releases/latest/download/install.sh | VISTA_INSTALL_DIR=/usr/local/bin sh
+```
+
+To install a specific version:
+
+```sh
+curl -fsSL https://github.com/ejohane/vista/releases/latest/download/install.sh | VISTA_VERSION=1.0.0 sh
+```
+
+If the repository or release assets are private, pass a GitHub token into both
+the installer download and the installer process:
+
+```sh
+GITHUB_TOKEN="$(gh auth token)" sh -c 'curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" https://github.com/ejohane/vista/releases/latest/download/install.sh | sh'
+```
 
 ## CLI Update Commands
 
