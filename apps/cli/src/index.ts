@@ -24,11 +24,14 @@ import {
   parseTransactionArgs,
   printTransactions,
 } from "./transactions";
+import { parseUpgradeArgs, printVersion, upgradeCli } from "./upgrade";
 
 function printHelp() {
   console.log(`Vista CLI
 
 Usage:
+  vista version [--check]
+  vista upgrade [--check] [--force]
   vista init
   vista connect plaid [--no-open] [--timeout-seconds 600]
   vista sync [--quiet]
@@ -71,6 +74,16 @@ async function run(argv: string[]) {
     command === "-h"
   ) {
     printHelp();
+    return;
+  }
+
+  if (command === "version") {
+    await printVersion(subcommand === "--check");
+    return;
+  }
+
+  if (command === "upgrade" || command === "self-update") {
+    await upgradeCli(parseUpgradeArgs([subcommand, ...rest].filter(Boolean)));
     return;
   }
 
