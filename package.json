@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "build": "bun run build:web && bun run build:sync && bun run build:state",
+    "build:cli:release": "bun run scripts/build-cli-release.ts",
     "build:state": "bun run --cwd apps/state build",
     "build:sync": "bun run --cwd apps/sync build",
     "build:web": "bun run --cwd apps/web build",
@@ -36,14 +37,20 @@
     "prepare:prod-config": "bun run scripts/prepare-prod-config.ts",
     "prepare": "bun run scripts/setup-hooks.ts",
     "precommit": "bun run lint && bun run typecheck && bun run test",
+    "release": "semantic-release",
     "test": "bun test",
     "typecheck": "bun run --cwd packages/db typecheck && bun run --cwd packages/plaid typecheck && bun run --cwd packages/household-state typecheck && bun run --cwd apps/cli typecheck && bun run --cwd apps/state typecheck && bun run --cwd apps/sync typecheck && bun run --cwd apps/web typecheck"
   },
   "devDependencies": {
     "@libsql/client": "^0.15.15",
     "@biomejs/biome": "^2.1.4",
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/exec": "^7.1.0",
+    "@semantic-release/github": "^12.0.2",
+    "@semantic-release/release-notes-generator": "^14.1.0",
     "bun-types": "^1.3.10",
     "drizzle-kit": "^0.31.4",
+    "semantic-release": "^25.0.2",
     "wrangler": "^4.74.0"
   }
 }

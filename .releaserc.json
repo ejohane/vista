@@ -1,0 +1,57 @@
+{
+  "branches": ["main"],
+  "tagFormat": "v${version}",
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    [
+      "@semantic-release/exec",
+      {
+        "prepareCmd": "bun run build:cli:release ${nextRelease.version}"
+      }
+    ],
+    [
+      "@semantic-release/github",
+      {
+        "assets": [
+          {
+            "path": "dist/cli/manifest.json",
+            "label": "Vista CLI release manifest"
+          },
+          {
+            "path": "dist/cli/vista-bun-darwin-arm64.tar.gz",
+            "label": "Vista CLI macOS arm64"
+          },
+          {
+            "path": "dist/cli/vista-bun-darwin-arm64.tar.gz.sha256",
+            "label": "Vista CLI macOS arm64 checksum"
+          },
+          {
+            "path": "dist/cli/vista-bun-darwin-x64.tar.gz",
+            "label": "Vista CLI macOS x64"
+          },
+          {
+            "path": "dist/cli/vista-bun-darwin-x64.tar.gz.sha256",
+            "label": "Vista CLI macOS x64 checksum"
+          },
+          {
+            "path": "dist/cli/vista-bun-linux-arm64.tar.gz",
+            "label": "Vista CLI Linux arm64"
+          },
+          {
+            "path": "dist/cli/vista-bun-linux-arm64.tar.gz.sha256",
+            "label": "Vista CLI Linux arm64 checksum"
+          },
+          {
+            "path": "dist/cli/vista-bun-linux-x64-baseline.tar.gz",
+            "label": "Vista CLI Linux x64 baseline"
+          },
+          {
+            "path": "dist/cli/vista-bun-linux-x64-baseline.tar.gz.sha256",
+            "label": "Vista CLI Linux x64 baseline checksum"
+          }
+        ]
+      }
+    ]
+  ]
+}
