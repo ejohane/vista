@@ -148,6 +148,23 @@ create index if not exists transactions_account_posted_idx on transactions(accou
 create index if not exists transactions_run_idx on transactions(source_sync_run_id);
 create unique index if not exists transactions_account_provider_idx on transactions(account_id, provider_transaction_id);
 
+create table if not exists income_profiles (
+  id text primary key,
+  household_id text not null references households(id),
+  person_name text not null,
+  source text not null,
+  salary_minor integer not null check (salary_minor >= 0),
+  bonus_minor integer not null default 0 check (bonus_minor >= 0),
+  currency text not null default 'USD',
+  effective_date text not null,
+  note text,
+  created_at integer not null,
+  updated_at integer not null,
+  check (salary_minor + bonus_minor > 0)
+);
+create unique index if not exists income_profiles_household_person_source_idx on income_profiles(household_id, person_name, source);
+create index if not exists income_profiles_household_person_idx on income_profiles(household_id, person_name);
+
 create table if not exists securities (
   id text primary key,
   provider text not null check (provider in ('plaid')),

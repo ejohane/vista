@@ -95,3 +95,16 @@ vista skill install
 
 This writes `vista-cli/SKILL.md` under `$CODEX_HOME/skills` or
 `~/.codex/skills`.
+
+## Manual Income
+
+Manual salary and bonus income are stored locally by person and source in the
+CLI SQLite database:
+
+```sh
+vista income set --person "Erik" --source "Employer" --salary 150000 --bonus 25000 --effective-date 2026-05-01
+vista income set --person "Partner" --source "Employer" --salary 120000
+vista income show
+vista income show --person "Erik"
+vista income clear --person "Erik" --source "Employer"
+```
