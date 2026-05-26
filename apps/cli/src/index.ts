@@ -15,6 +15,11 @@ import { listHoldings, printHoldings } from "./holdings";
 import { openLocalD1Database } from "./local-d1";
 import { ensureLocalSchema } from "./schema";
 import {
+  installVistaSkill,
+  printSkillHelp,
+  VISTA_SKILL_CONTENT,
+} from "./skill";
+import {
   parseSyncArgs,
   printSyncResult,
   syncLocalPlaidConnections,
@@ -33,6 +38,8 @@ Usage:
   vista version [--check]
   vista upgrade [--check] [--force]
   vista init
+  vista skill install
+  vista skill print
   vista connect plaid [--no-open] [--timeout-seconds 600]
   vista sync [--quiet]
   vista dashboard
@@ -105,6 +112,38 @@ async function run(argv: string[]) {
     console.log(`Config: ${CONFIG_PATH}`);
     console.log(`Database: ${databasePath}`);
     return;
+  }
+
+  if (command === "skill") {
+    if (!subcommand || subcommand === "help" || subcommand === "--help") {
+      printSkillHelp();
+      return;
+    }
+
+    if (subcommand === "install") {
+      const unexpectedArg = rest.find(Boolean);
+
+      if (unexpectedArg) {
+        throw new Error(`Unknown skill install option: ${unexpectedArg}`);
+      }
+
+      const skillFilePath = installVistaSkill();
+      console.log(`Installed Vista CLI skill: ${skillFilePath}`);
+      return;
+    }
+
+    if (subcommand === "print") {
+      const unexpectedArg = rest.find(Boolean);
+
+      if (unexpectedArg) {
+        throw new Error(`Unknown skill print option: ${unexpectedArg}`);
+      }
+
+      console.log(VISTA_SKILL_CONTENT);
+      return;
+    }
+
+    throw new Error(`Unknown skill command: ${subcommand}`);
   }
 
   if (command === "connect" && subcommand === "plaid") {
