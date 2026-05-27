@@ -108,3 +108,18 @@ vista income show
 vista income show --person "Erik"
 vista income clear --person "Erik" --source "Employer"
 ```
+
+## Coinbase
+
+Create a view-only Coinbase Advanced Trade API key, save the downloaded key
+JSON file, then connect it:
+
+```sh
+vista connect coinbase --api-key-file ~/Downloads/cdp_api_key.json
+vista sync
+vista accounts
+vista holdings
+```
+
+Coinbase sync stores one local Coinbase investment account and crypto holdings
+priced in USD when a `*-USD` Coinbase product is available.

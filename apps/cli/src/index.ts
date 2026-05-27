@@ -9,6 +9,7 @@ import {
   loadCliConfig,
   VISTA_HOME,
 } from "./config";
+import { connectCoinbase, parseConnectCoinbaseArgs } from "./connect-coinbase";
 import { connectPlaid, parseConnectPlaidArgs } from "./connect-plaid";
 import { printDashboard } from "./dashboard";
 import { listHoldings, printHoldings } from "./holdings";
@@ -20,11 +21,7 @@ import {
   printSkillHelp,
   VISTA_SKILL_CONTENT,
 } from "./skill";
-import {
-  parseSyncArgs,
-  printSyncResult,
-  syncLocalPlaidConnections,
-} from "./sync";
+import { parseSyncArgs, printSyncResult, syncLocalConnections } from "./sync";
 import {
   listTransactions,
   parseTransactionArgs,
@@ -42,6 +39,7 @@ Usage:
   vista skill install
   vista skill print
   vista connect plaid [--no-open] [--timeout-seconds 600]
+  vista connect coinbase --api-key-file <path>
   vista sync [--quiet]
   vista dashboard
   vista accounts
@@ -168,13 +166,32 @@ async function run(argv: string[]) {
     return;
   }
 
+  if (command === "connect" && subcommand === "coinbase") {
+    initializeCliConfig();
+    const config = loadCliConfig();
+    const options = parseConnectCoinbaseArgs(rest);
+
+    await withDatabase(config.databasePath, async (database) => {
+      const result = await connectCoinbase({
+        config,
+        database,
+        options,
+      });
+
+      console.log("Connected Coinbase.");
+      console.log(`Connection: ${result.connectionId}`);
+      console.log(`Household: ${result.householdId}`);
+    });
+    return;
+  }
+
   if (command === "sync") {
     initializeCliConfig();
     const config = loadCliConfig();
     const options = parseSyncArgs([subcommand, ...rest].filter(Boolean));
 
     await withDatabase(config.databasePath, async (database) => {
-      const results = await syncLocalPlaidConnections({
+      const results = await syncLocalConnections({
         config,
         database,
       });

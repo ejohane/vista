@@ -1,3 +1,4 @@
+import { syncConfiguredCoinbaseConnections } from "@vista/coinbase";
 import { syncConfiguredPlaidConnections } from "@vista/plaid";
 
 import type { CliConfig } from "./config";
@@ -7,9 +8,20 @@ type SyncOptions = {
   quiet: boolean;
 };
 
-function requireConfigValue(value: string | undefined, name: string) {
+type LocalSyncResult = {
+  provider: "coinbase" | "plaid";
+  recordsChanged: number;
+  runId: string;
+  status: "succeeded";
+};
+
+function requireConfigValue(
+  value: string | undefined,
+  name: string,
+  provider: string,
+) {
   if (!value?.trim()) {
-    throw new Error(`${name} is required for Plaid sync.`);
+    throw new Error(`${name} is required for ${provider} sync.`);
   }
 
   return value;
@@ -40,11 +52,17 @@ export async function syncLocalPlaidConnections(args: {
   const clientId = requireConfigValue(
     args.config.plaidClientId,
     "PLAID_CLIENT_ID",
+    "Plaid",
   );
-  const secret = requireConfigValue(args.config.plaidSecret, "PLAID_SECRET");
+  const secret = requireConfigValue(
+    args.config.plaidSecret,
+    "PLAID_SECRET",
+    "Plaid",
+  );
   const providerTokenEncryptionKey = requireConfigValue(
     args.config.providerTokenEncryptionKey,
     "PROVIDER_TOKEN_ENCRYPTION_KEY",
+    "Plaid",
   );
 
   return syncConfiguredPlaidConnections({
@@ -57,8 +75,70 @@ export async function syncLocalPlaidConnections(args: {
   });
 }
 
+async function hasActiveProviderConnection(
+  database: LocalD1Database,
+  provider: "coinbase" | "plaid",
+) {
+  const row = await database
+    .prepare(
+      `
+        select count(*) as count
+        from provider_connections
+        where provider = ? and status = ?
+      `,
+    )
+    .bind(provider, "active")
+    .first<{ count: number }>();
+
+  return Number(row?.count ?? 0) > 0;
+}
+
+export async function syncLocalConnections(args: {
+  config: CliConfig;
+  database: LocalD1Database;
+  now?: Date;
+}) {
+  const hasPlaidConnection = await hasActiveProviderConnection(
+    args.database,
+    "plaid",
+  );
+  const hasCoinbaseConnection = await hasActiveProviderConnection(
+    args.database,
+    "coinbase",
+  );
+  const providerTokenEncryptionKey =
+    hasCoinbaseConnection || hasPlaidConnection
+      ? requireConfigValue(
+          args.config.providerTokenEncryptionKey,
+          "PROVIDER_TOKEN_ENCRYPTION_KEY",
+          "provider",
+        )
+      : undefined;
+  const plaidResults = hasPlaidConnection
+    ? await syncLocalPlaidConnections(args)
+    : [];
+  const coinbaseResults = hasCoinbaseConnection
+    ? await syncConfiguredCoinbaseConnections({
+        database: args.database,
+        now: args.now,
+        providerTokenEncryptionKey,
+      })
+    : [];
+
+  return [
+    ...plaidResults.map((result) => ({
+      ...result,
+      provider: "plaid" as const,
+    })),
+    ...coinbaseResults.map((result) => ({
+      ...result,
+      provider: "coinbase" as const,
+    })),
+  ] satisfies LocalSyncResult[];
+}
+
 export function printSyncResult(
-  results: Awaited<ReturnType<typeof syncLocalPlaidConnections>>,
+  results: LocalSyncResult[],
   options: SyncOptions,
 ) {
   if (options.quiet) {
@@ -66,7 +146,7 @@ export function printSyncResult(
   }
 
   if (results.length === 0) {
-    console.log("No active Plaid connections to sync.");
+    console.log("No active provider connections to sync.");
     return;
   }
 
@@ -76,11 +156,11 @@ export function printSyncResult(
   );
 
   console.log(
-    `Synced ${results.length} Plaid connection${results.length === 1 ? "" : "s"}.`,
+    `Synced ${results.length} provider connection${results.length === 1 ? "" : "s"}.`,
   );
   console.log(`Records changed: ${recordsChanged}`);
 
   for (const result of results) {
-    console.log(`Run: ${result.runId}`);
+    console.log(`Run (${result.provider}): ${result.runId}`);
   }
 }
