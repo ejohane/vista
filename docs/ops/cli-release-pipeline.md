@@ -123,3 +123,16 @@ vista holdings
 
 Coinbase sync stores one local Coinbase investment account and crypto holdings
 priced in USD when a `*-USD` Coinbase product is available.
+
+## HealthEquity HSA
+
+HealthEquity is connected through a balance-only Plaid profile. Plaid Balance is
+not passed to Link directly; the CLI initializes the Item with `auth`, stores a
+balance-only marker, and syncs `/accounts/get` without investment or transaction
+endpoint calls:
+
+```sh
+vista connect healthequity
+vista sync
+vista accounts
+```

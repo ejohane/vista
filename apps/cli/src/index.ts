@@ -10,7 +10,11 @@ import {
   VISTA_HOME,
 } from "./config";
 import { connectCoinbase, parseConnectCoinbaseArgs } from "./connect-coinbase";
-import { connectPlaid, parseConnectPlaidArgs } from "./connect-plaid";
+import {
+  connectPlaid,
+  parseConnectHealthEquityArgs,
+  parseConnectPlaidArgs,
+} from "./connect-plaid";
 import { printDashboard } from "./dashboard";
 import { listHoldings, printHoldings } from "./holdings";
 import { parseIncomeArgs, printIncomeHelp, runIncomeCommand } from "./income";
@@ -39,6 +43,7 @@ Usage:
   vista skill install
   vista skill print
   vista connect plaid [--no-open] [--timeout-seconds 600]
+  vista connect healthequity [--no-open] [--timeout-seconds 600]
   vista connect coinbase --api-key-file <path>
   vista sync [--quiet]
   vista dashboard
@@ -160,6 +165,25 @@ async function run(argv: string[]) {
       });
 
       console.log(`Connected Plaid item ${result.itemId}.`);
+      console.log(`Connection: ${result.connectionId}`);
+      console.log(`Household: ${result.householdId}`);
+    });
+    return;
+  }
+
+  if (command === "connect" && subcommand === "healthequity") {
+    initializeCliConfig();
+    const config = loadCliConfig();
+    const options = parseConnectHealthEquityArgs(rest);
+
+    await withDatabase(config.databasePath, async (database) => {
+      const result = await connectPlaid({
+        config,
+        database,
+        options,
+      });
+
+      console.log(`Connected HealthEquity Plaid item ${result.itemId}.`);
       console.log(`Connection: ${result.connectionId}`);
       console.log(`Household: ${result.householdId}`);
     });

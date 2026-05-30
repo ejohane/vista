@@ -10,6 +10,9 @@ import type { CliConfig } from "./config";
 import type { LocalD1Database } from "./local-d1";
 
 const DEFAULT_HOUSEHOLD_NAME = "Vista Household";
+const HEALTHEQUITY_INSTITUTION_ID = "ins_133453";
+const HEALTHEQUITY_INSTITUTION_NAME = "Health Equity";
+const PLAID_BALANCE_ONLY_ACCESS_URL = "vista:plaid:balance-only";
 const PLAID_REQUIRED_PRODUCTS = ["investments"] as const;
 const PLAID_REQUIRED_IF_SUPPORTED_PRODUCTS = [
   "transactions",
@@ -19,6 +22,7 @@ const PLAID_TRANSACTIONS_DAYS_REQUESTED = 730;
 const DEFAULT_TIMEOUT_SECONDS = 600;
 
 type ConnectPlaidArgs = {
+  connectionProfile: "default" | "healthequity";
   householdId?: string;
   householdName?: string;
   openBrowser: boolean;
@@ -196,6 +200,7 @@ async function waitForPublicToken(args: {
 
 async function persistPlaidConnection(args: {
   accessToken: string;
+  accessUrl?: null | string;
   database: LocalD1Database;
   householdId: string;
   institutionId: null | string;
@@ -221,6 +226,7 @@ async function persistPlaidConnection(args: {
           external_connection_id,
           access_token,
           access_token_encrypted,
+          access_url,
           credential_key_version,
           plaid_item_id,
           institution_id,
@@ -228,12 +234,13 @@ async function persistPlaidConnection(args: {
           created_at,
           updated_at
         )
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict(provider, external_connection_id) do update set
           household_id = excluded.household_id,
           status = excluded.status,
           access_token = excluded.access_token,
           access_token_encrypted = excluded.access_token_encrypted,
+          access_url = excluded.access_url,
           credential_key_version = excluded.credential_key_version,
           plaid_item_id = excluded.plaid_item_id,
           institution_id = excluded.institution_id,
@@ -249,6 +256,7 @@ async function persistPlaidConnection(args: {
       args.itemId,
       null,
       encryptedAccessToken,
+      args.accessUrl ?? null,
       1,
       args.itemId,
       args.institutionId,
@@ -263,6 +271,7 @@ async function persistPlaidConnection(args: {
 
 export function parseConnectPlaidArgs(argv: string[]): ConnectPlaidArgs {
   const args: ConnectPlaidArgs = {
+    connectionProfile: "default",
     openBrowser: true,
     timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
   };
@@ -287,6 +296,18 @@ export function parseConnectPlaidArgs(argv: string[]): ConnectPlaidArgs {
       continue;
     }
 
+    if (arg === "--profile") {
+      index += 1;
+      const profile = argv[index];
+
+      if (profile !== "default" && profile !== "healthequity") {
+        throw new Error("--profile must be default or healthequity.");
+      }
+
+      args.connectionProfile = profile;
+      continue;
+    }
+
     if (arg === "--timeout-seconds") {
       index += 1;
       args.timeoutSeconds = Number(argv[index]);
@@ -301,6 +322,56 @@ export function parseConnectPlaidArgs(argv: string[]): ConnectPlaidArgs {
   }
 
   return args;
+}
+
+export function parseConnectHealthEquityArgs(argv: string[]) {
+  return parseConnectPlaidArgs(["--profile", "healthequity", ...argv]);
+}
+
+function resolvePlaidConnectionProfile(options: ConnectPlaidArgs) {
+  if (options.connectionProfile === "healthequity") {
+    return {
+      accessUrl: PLAID_BALANCE_ONLY_ACCESS_URL,
+      expectedInstitutionId: HEALTHEQUITY_INSTITUTION_ID,
+      expectedInstitutionName: HEALTHEQUITY_INSTITUTION_NAME,
+      products: ["auth"],
+      requiredIfSupportedProducts: [],
+    };
+  }
+
+  return {
+    accessUrl: null,
+    expectedInstitutionId: null,
+    expectedInstitutionName: null,
+    products: [...PLAID_REQUIRED_PRODUCTS],
+    requiredIfSupportedProducts: [...PLAID_REQUIRED_IF_SUPPORTED_PRODUCTS],
+  };
+}
+
+function assertExpectedInstitution(args: {
+  completedLink: Awaited<ReturnType<typeof waitForPublicToken>>;
+  profile: ReturnType<typeof resolvePlaidConnectionProfile>;
+}) {
+  if (!args.profile.expectedInstitutionId) {
+    return;
+  }
+
+  if (args.completedLink.institutionId === args.profile.expectedInstitutionId) {
+    return;
+  }
+
+  if (
+    args.completedLink.institutionName?.trim().toLowerCase() ===
+    args.profile.expectedInstitutionName?.toLowerCase()
+  ) {
+    return;
+  }
+
+  throw new Error(
+    `Expected ${args.profile.expectedInstitutionName}, but Plaid completed with ${
+      args.completedLink.institutionName ?? "a different institution"
+    }. Try again and select ${args.profile.expectedInstitutionName}.`,
+  );
 }
 
 export async function connectPlaid(args: {
@@ -323,6 +394,7 @@ export async function connectPlaid(args: {
     environment: args.config.plaidEnvironment,
     secret,
   });
+  const profile = resolvePlaidConnectionProfile(args.options);
   const { householdId, householdWasCreated } = await ensureHousehold(
     args.database,
     now,
@@ -335,10 +407,16 @@ export async function connectPlaid(args: {
     hostedLink: {
       urlLifetimeSeconds: args.options.timeoutSeconds,
     },
-    products: [...PLAID_REQUIRED_PRODUCTS],
+    products: profile.products,
     redirectUri: args.config.plaidRedirectUri,
-    requiredIfSupportedProducts: [...PLAID_REQUIRED_IF_SUPPORTED_PRODUCTS],
-    transactionsDaysRequested: PLAID_TRANSACTIONS_DAYS_REQUESTED,
+    requiredIfSupportedProducts:
+      profile.requiredIfSupportedProducts.length > 0
+        ? profile.requiredIfSupportedProducts
+        : undefined,
+    transactionsDaysRequested:
+      args.options.connectionProfile === "default"
+        ? PLAID_TRANSACTIONS_DAYS_REQUESTED
+        : undefined,
     userId: householdId,
   });
 
@@ -360,11 +438,16 @@ export async function connectPlaid(args: {
     linkToken: linkTokenResult.linkToken,
     timeoutSeconds: args.options.timeoutSeconds,
   });
+  assertExpectedInstitution({
+    completedLink,
+    profile,
+  });
   const exchangeResult = await client.exchangePublicToken({
     publicToken: completedLink.publicToken,
   });
   const connectionId = await persistPlaidConnection({
     accessToken: exchangeResult.accessToken,
+    accessUrl: profile.accessUrl,
     database: args.database,
     householdId,
     institutionId: completedLink.institutionId,

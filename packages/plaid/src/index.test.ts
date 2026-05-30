@@ -626,4 +626,119 @@ describe("syncPlaidConnection", () => {
         .get("security:plaid:security-1"),
     ).toEqual({ count: 1 });
   });
+
+  test("syncs HealthEquity balance-only connections without product endpoint calls", async () => {
+    const { d1, sqlite } = createPlaidTestDatabase();
+    const createdAt = new Date("2026-05-30T12:00:00.000Z").getTime();
+
+    sqlite
+      .query(
+        `
+          insert into households (id, name, last_synced_at, created_at)
+          values (?, ?, ?, ?)
+        `,
+      )
+      .run("household_default", "Vista Household", createdAt, createdAt);
+    sqlite
+      .query(
+        `
+          insert into provider_connections (
+            id,
+            household_id,
+            provider,
+            status,
+            external_connection_id,
+            access_token,
+            access_url,
+            institution_id,
+            institution_name,
+            plaid_item_id,
+            created_at,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "conn:plaid:item-healthequity-1",
+        "household_default",
+        "plaid",
+        "active",
+        "item-healthequity-1",
+        "access-healthequity-1",
+        "vista:plaid:balance-only",
+        "ins_133453",
+        "Health Equity",
+        "item-healthequity-1",
+        createdAt,
+        createdAt,
+      );
+
+    const result = await syncPlaidConnection({
+      client: {
+        createLinkToken: async () => {
+          throw new Error("createLinkToken should not be called");
+        },
+        exchangePublicToken: async () => {
+          throw new Error("exchangePublicToken should not be called");
+        },
+        getAccounts: async () => ({
+          accounts: [
+            {
+              account_id: "hsa-1",
+              balances: {
+                current: 1234.56,
+                iso_currency_code: "USD",
+              },
+              name: "HealthEquity HSA",
+              official_name: "HealthEquity HSA",
+              subtype: "hsa",
+              type: "depository",
+            },
+          ],
+        }),
+        getInvestmentsHoldings: async () => {
+          throw new Error("holdings should not be requested");
+        },
+        getInvestmentsTransactions: async () => {
+          throw new Error("investment transactions should not be requested");
+        },
+        getTransactionsSync: async () => {
+          throw new Error("transactions should not be requested");
+        },
+      },
+      connectionId: "conn:plaid:item-healthequity-1",
+      database: d1,
+      now: new Date("2026-05-30T13:00:00.000Z"),
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(
+      sqlite
+        .query(
+          `
+            select
+              account_subtype as accountSubtype,
+              account_type as accountType,
+              balance_minor as balanceMinor,
+              institution_name as institutionName,
+              reporting_group as reportingGroup
+            from accounts
+          `,
+        )
+        .get(),
+    ).toEqual({
+      accountSubtype: "hsa",
+      accountType: "brokerage",
+      balanceMinor: 123456,
+      institutionName: "Health Equity",
+      reportingGroup: "investments",
+    });
+    expect(
+      sqlite.query("select count(*) as count from holdings").get(),
+    ).toEqual({ count: 0 });
+    expect(
+      sqlite.query("select count(*) as count from transactions").get(),
+    ).toEqual({ count: 0 });
+  });
 });
