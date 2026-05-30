@@ -39,7 +39,7 @@
     "precommit": "bun run lint && bun run typecheck && bun run test",
     "release": "semantic-release",
     "test": "bun test",
-    "typecheck": "bun run --cwd packages/db typecheck && bun run --cwd packages/plaid typecheck && bun run --cwd packages/household-state typecheck && bun run --cwd apps/cli typecheck && bun run --cwd apps/state typecheck && bun run --cwd apps/sync typecheck && bun run --cwd apps/web typecheck"
+    "typecheck": "bun run --cwd packages/db typecheck && bun run --cwd packages/plaid typecheck && bun run --cwd packages/coinbase typecheck && bun run --cwd packages/household-state typecheck && bun run --cwd apps/cli typecheck && bun run --cwd apps/state typecheck && bun run --cwd apps/sync typecheck && bun run --cwd apps/web typecheck"
   },
   "devDependencies": {
     "@libsql/client": "^0.15.15",

@@ -1,5 +1,65 @@
 import type { LocalD1Database } from "./local-d1";
 
+const PROVIDER_CONNECTIONS_SCHEMA_SQL = `
+create table provider_connections (
+  id text primary key,
+  household_id text not null references households(id),
+  provider text not null check (provider in ('plaid', 'coinbase')),
+  status text not null check (status in ('active', 'disconnected', 'error')),
+  external_connection_id text not null,
+  access_token text,
+  access_token_encrypted text,
+  access_secret text,
+  access_secret_encrypted text,
+  access_url text,
+  credential_key_version integer default 1,
+  plaid_item_id text,
+  institution_id text,
+  institution_name text,
+  created_at integer not null,
+  updated_at integer not null
+)`;
+
+const SYNC_RUNS_SCHEMA_SQL = `
+create table sync_runs (
+  id text primary key,
+  household_id text not null references households(id),
+  provider_connection_id text references provider_connections(id),
+  provider text check (provider is null or provider in ('plaid', 'coinbase')),
+  status text not null check (status in ('running', 'succeeded', 'failed')),
+  trigger text not null check (trigger in ('seed', 'scheduled')),
+  started_at integer not null,
+  completed_at integer,
+  records_changed integer not null default 0,
+  error_summary text
+)`;
+
+const SECURITIES_SCHEMA_SQL = `
+create table securities (
+  id text primary key,
+  provider text not null check (provider in ('plaid', 'coinbase')),
+  provider_security_id text not null,
+  symbol text,
+  name text not null,
+  security_type text,
+  security_subtype text,
+  currency text not null default 'USD',
+  price_source text not null check (price_source in ('alpha_vantage', 'plaid_holdings', 'coinbase', 'missing')),
+  created_at integer not null,
+  updated_at integer not null
+)`;
+
+const SECURITY_PRICE_DAILY_SCHEMA_SQL = `
+create table security_price_daily (
+  security_id text not null references securities(id),
+  price_date text not null,
+  close_price_minor integer,
+  currency text not null default 'USD',
+  source text not null check (source in ('alpha_vantage', 'plaid_holdings', 'coinbase', 'missing')),
+  is_estimated integer not null default 0 check (is_estimated in (0, 1)),
+  fetched_at integer not null
+)`;
+
 const CURRENT_SCHEMA_SQL = `
 create table if not exists households (
   id text primary key,
@@ -35,7 +95,7 @@ create unique index if not exists user_identities_provider_user_idx on user_iden
 create table if not exists provider_connections (
   id text primary key,
   household_id text not null references households(id),
-  provider text not null check (provider in ('plaid')),
+  provider text not null check (provider in ('plaid', 'coinbase')),
   status text not null check (status in ('active', 'disconnected', 'error')),
   external_connection_id text not null,
   access_token text,
@@ -99,7 +159,7 @@ create table if not exists sync_runs (
   id text primary key,
   household_id text not null references households(id),
   provider_connection_id text references provider_connections(id),
-  provider text check (provider is null or provider in ('plaid')),
+  provider text check (provider is null or provider in ('plaid', 'coinbase')),
   status text not null check (status in ('running', 'succeeded', 'failed')),
   trigger text not null check (trigger in ('seed', 'scheduled')),
   started_at integer not null,
@@ -167,14 +227,14 @@ create index if not exists income_profiles_household_person_idx on income_profil
 
 create table if not exists securities (
   id text primary key,
-  provider text not null check (provider in ('plaid')),
+  provider text not null check (provider in ('plaid', 'coinbase')),
   provider_security_id text not null,
   symbol text,
   name text not null,
   security_type text,
   security_subtype text,
   currency text not null default 'USD',
-  price_source text not null check (price_source in ('alpha_vantage', 'plaid_holdings', 'missing')),
+  price_source text not null check (price_source in ('alpha_vantage', 'plaid_holdings', 'coinbase', 'missing')),
   created_at integer not null,
   updated_at integer not null
 );
@@ -202,7 +262,7 @@ create table if not exists security_price_daily (
   price_date text not null,
   close_price_minor integer,
   currency text not null default 'USD',
-  source text not null check (source in ('alpha_vantage', 'plaid_holdings', 'missing')),
+  source text not null check (source in ('alpha_vantage', 'plaid_holdings', 'coinbase', 'missing')),
   is_estimated integer not null default 0 check (is_estimated in (0, 1)),
   fetched_at integer not null
 );
@@ -289,6 +349,140 @@ create table if not exists daily_net_worth_facts (
 create unique index if not exists daily_net_worth_facts_household_date_idx on daily_net_worth_facts(household_id, fact_date);
 `;
 
+type SchemaRow = {
+  sql: string;
+};
+
+function tableSql(database: LocalD1Database, tableName: string) {
+  const row = database.sqlite
+    .query(
+      `
+        select sql
+        from sqlite_master
+        where type = 'table' and name = ?
+      `,
+    )
+    .get(tableName) as null | SchemaRow;
+
+  return row?.sql ?? "";
+}
+
+function rebuildTable(args: {
+  columns: string[];
+  database: LocalD1Database;
+  schemaSql: string;
+  tableName: string;
+}) {
+  const oldTableName = `__vista_old_${args.tableName}`;
+  const quotedColumns = args.columns.join(", ");
+
+  args.database.sqlite.exec("pragma foreign_keys = off");
+  args.database.sqlite.exec("pragma legacy_alter_table = on");
+
+  try {
+    args.database.sqlite.exec(`drop table if exists ${oldTableName}`);
+    args.database.sqlite.exec(
+      `alter table ${args.tableName} rename to ${oldTableName}`,
+    );
+    args.database.sqlite.exec(args.schemaSql);
+    args.database.sqlite.exec(
+      `insert into ${args.tableName} (${quotedColumns}) select ${quotedColumns} from ${oldTableName}`,
+    );
+    args.database.sqlite.exec(`drop table ${oldTableName}`);
+  } finally {
+    args.database.sqlite.exec("pragma legacy_alter_table = off");
+    args.database.sqlite.exec("pragma foreign_keys = on");
+  }
+}
+
+function ensureCoinbaseSchemaSupport(database: LocalD1Database) {
+  if (!tableSql(database, "provider_connections").includes("'coinbase'")) {
+    rebuildTable({
+      columns: [
+        "id",
+        "household_id",
+        "provider",
+        "status",
+        "external_connection_id",
+        "access_token",
+        "access_token_encrypted",
+        "access_secret",
+        "access_secret_encrypted",
+        "access_url",
+        "credential_key_version",
+        "plaid_item_id",
+        "institution_id",
+        "institution_name",
+        "created_at",
+        "updated_at",
+      ],
+      database,
+      schemaSql: PROVIDER_CONNECTIONS_SCHEMA_SQL,
+      tableName: "provider_connections",
+    });
+  }
+
+  if (!tableSql(database, "sync_runs").includes("'coinbase'")) {
+    rebuildTable({
+      columns: [
+        "id",
+        "household_id",
+        "provider_connection_id",
+        "provider",
+        "status",
+        "trigger",
+        "started_at",
+        "completed_at",
+        "records_changed",
+        "error_summary",
+      ],
+      database,
+      schemaSql: SYNC_RUNS_SCHEMA_SQL,
+      tableName: "sync_runs",
+    });
+  }
+
+  if (!tableSql(database, "securities").includes("'coinbase'")) {
+    rebuildTable({
+      columns: [
+        "id",
+        "provider",
+        "provider_security_id",
+        "symbol",
+        "name",
+        "security_type",
+        "security_subtype",
+        "currency",
+        "price_source",
+        "created_at",
+        "updated_at",
+      ],
+      database,
+      schemaSql: SECURITIES_SCHEMA_SQL,
+      tableName: "securities",
+    });
+  }
+
+  if (!tableSql(database, "security_price_daily").includes("'coinbase'")) {
+    rebuildTable({
+      columns: [
+        "security_id",
+        "price_date",
+        "close_price_minor",
+        "currency",
+        "source",
+        "is_estimated",
+        "fetched_at",
+      ],
+      database,
+      schemaSql: SECURITY_PRICE_DAILY_SCHEMA_SQL,
+      tableName: "security_price_daily",
+    });
+  }
+}
+
 export async function ensureLocalSchema(database: LocalD1Database) {
+  await database.exec(CURRENT_SCHEMA_SQL);
+  ensureCoinbaseSchemaSupport(database);
   await database.exec(CURRENT_SCHEMA_SQL);
 }

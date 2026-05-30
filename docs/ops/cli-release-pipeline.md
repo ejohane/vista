@@ -108,3 +108,31 @@ vista income show
 vista income show --person "Erik"
 vista income clear --person "Erik" --source "Employer"
 ```
+
+## Coinbase
+
+Create a view-only Coinbase Advanced Trade API key, save the downloaded key
+JSON file, then connect it:
+
+```sh
+vista connect coinbase --api-key-file ~/Downloads/cdp_api_key.json
+vista sync
+vista accounts
+vista holdings
+```
+
+Coinbase sync stores one local Coinbase investment account and crypto holdings
+priced in USD when a `*-USD` Coinbase product is available.
+
+## HealthEquity HSA
+
+HealthEquity is connected through a balance-only Plaid profile. Plaid Balance is
+not passed to Link directly; the CLI initializes the Item with `auth`, stores a
+balance-only marker, and syncs `/accounts/get` without investment or transaction
+endpoint calls:
+
+```sh
+vista connect healthequity
+vista sync
+vista accounts
+```

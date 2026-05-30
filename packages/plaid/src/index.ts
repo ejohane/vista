@@ -99,11 +99,13 @@ type PlaidApiResponse<T> = T & {
 };
 
 type PlaidConnectionRow = {
+  accessUrl: null | string;
   accessToken: null | string;
   accessTokenEncrypted: null | string;
   credentialKeyVersion: null | number;
   householdId: string;
   id: string;
+  institutionId: null | string;
   institutionName: null | string;
   status: "active" | "disconnected" | "error";
 };
@@ -330,6 +332,20 @@ function normalizeInstitutionName(connection: PlaidConnectionRow) {
   return connection.institutionName?.trim() || "Plaid";
 }
 
+function isHealthEquityConnection(connection: PlaidConnectionRow) {
+  return (
+    connection.institutionId === "ins_133453" ||
+    connection.institutionName?.trim().toLowerCase() === "health equity"
+  );
+}
+
+function isBalanceOnlyConnection(connection: PlaidConnectionRow) {
+  return (
+    connection.accessUrl === "vista:plaid:balance-only" ||
+    isHealthEquityConnection(connection)
+  );
+}
+
 function normalizeHoldingAssetClass(security?: PlaidApiSecurity) {
   const securityType = security?.type?.trim().toLowerCase();
 
@@ -400,7 +416,18 @@ function parseCapturedAt(
   return Number.isNaN(parsedTimestamp) ? fallbackTimestamp : parsedTimestamp;
 }
 
-function inferPlaidAccountClassification(account: PlaidApiAccount) {
+function inferPlaidAccountClassification(
+  account: PlaidApiAccount,
+  connection?: PlaidConnectionRow,
+) {
+  if (connection && isHealthEquityConnection(connection)) {
+    return {
+      accountSubtype: account.subtype ?? "hsa",
+      accountType: "brokerage" as const,
+      reportingGroup: "investments" as const,
+    };
+  }
+
   const subtype = account.subtype?.toLowerCase() ?? "";
 
   if (account.type === "investment") {
@@ -486,17 +513,6 @@ function inferPlaidAccountClassification(account: PlaidApiAccount) {
     accountType: "checking" as const,
     reportingGroup: "cash" as const,
   };
-}
-
-function normalizeBalanceMinor(account: PlaidApiAccount) {
-  const classification = inferPlaidAccountClassification(account);
-  const currentMinor = toMinorUnits(account.balances.current);
-
-  if (classification.reportingGroup === "liabilities") {
-    return -Math.abs(currentMinor);
-  }
-
-  return currentMinor;
 }
 
 async function requestPlaid<T>(args: {
@@ -801,9 +817,11 @@ async function loadProviderConnection(
         select
           access_token as accessToken,
           access_token_encrypted as accessTokenEncrypted,
+          access_url as accessUrl,
           credential_key_version as credentialKeyVersion,
           household_id as householdId,
           id,
+          institution_id as institutionId,
           institution_name as institutionName,
           status
         from provider_connections
@@ -1161,7 +1179,10 @@ async function upsertPlaidAccount(args: {
   now: Date;
   runId: string;
 }) {
-  const classification = inferPlaidAccountClassification(args.account);
+  const classification = inferPlaidAccountClassification(
+    args.account,
+    args.connection,
+  );
   const providerAccountId = providerAccountRowId(
     args.connection.id,
     args.account.account_id,
@@ -1172,7 +1193,10 @@ async function upsertPlaidAccount(args: {
   );
   const institutionName = normalizeInstitutionName(args.connection);
   const displayName = args.account.official_name?.trim() || args.account.name;
-  const balanceMinor = normalizeBalanceMinor(args.account);
+  const balanceMinor =
+    classification.reportingGroup === "liabilities"
+      ? -Math.abs(toMinorUnits(args.account.balances.current))
+      : toMinorUnits(args.account.balances.current);
   const asOfDate = args.now.toISOString().slice(0, 10);
 
   await args.database.batch([
@@ -1519,8 +1543,9 @@ export async function syncPlaidConnection(
     const investmentAccounts = accountsResponse.accounts.filter(
       (account) => account.type === "investment",
     );
+    const syncBalanceOnly = isBalanceOnlyConnection(connection);
     const holdingsResponse =
-      investmentAccounts.length > 0
+      !syncBalanceOnly && investmentAccounts.length > 0
         ? await client.getInvestmentsHoldings({
             accessToken,
           })
@@ -1555,7 +1580,7 @@ export async function syncPlaidConnection(
       });
     }
 
-    if (client.getTransactionsSync) {
+    if (!syncBalanceOnly && client.getTransactionsSync) {
       let cursor =
         (await loadSyncCheckpoint(args.database, connection.id))?.cursor ??
         null;
@@ -1602,7 +1627,11 @@ export async function syncPlaidConnection(
       }
     }
 
-    if (client.getInvestmentsTransactions && investmentAccounts.length > 0) {
+    if (
+      !syncBalanceOnly &&
+      client.getInvestmentsTransactions &&
+      investmentAccounts.length > 0
+    ) {
       const endDate = now.toISOString().slice(0, 10);
       const startDateValue = new Date(now);
       startDateValue.setUTCDate(startDateValue.getUTCDate() - 730);
