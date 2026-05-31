@@ -15,6 +15,11 @@ import {
   parseConnectHealthEquityArgs,
   parseConnectPlaidArgs,
 } from "./connect-plaid";
+import {
+  parseConnectionsArgs,
+  printConnectionsHelp,
+  runConnectionsCommand,
+} from "./connections";
 import { printDashboard } from "./dashboard";
 import { listHoldings, printHoldings } from "./holdings";
 import { parseIncomeArgs, printIncomeHelp, runIncomeCommand } from "./income";
@@ -55,6 +60,10 @@ Usage:
   vista connect plaid [--no-open] [--timeout-seconds 600]
   vista connect healthequity [--no-open] [--timeout-seconds 600]
   vista connect coinbase --api-key-file <path>
+  vista connections
+  vista connections show <id>
+  vista connections test <id>
+  vista connections remove <id> --yes
   vista sync [--quiet]
   vista sync runs [--limit 20]
   vista sync show <run-id>
@@ -218,6 +227,26 @@ async function run(argv: string[]) {
       console.log("Connected Coinbase.");
       console.log(`Connection: ${result.connectionId}`);
       console.log(`Household: ${result.householdId}`);
+    });
+    return;
+  }
+
+  if (command === "connections") {
+    if (
+      subcommand === "help" ||
+      subcommand === "--help" ||
+      subcommand === "-h"
+    ) {
+      printConnectionsHelp();
+      return;
+    }
+
+    initializeCliConfig();
+    const config = loadCliConfig();
+    const options = parseConnectionsArgs([subcommand, ...rest].filter(Boolean));
+
+    await withDatabase(config.databasePath, async (database) => {
+      await runConnectionsCommand(database, options);
     });
     return;
   }

@@ -22,6 +22,9 @@ vista status
 vista sync
 vista sync runs
 vista sync show <run-id>
+vista connections
+vista connections show <id>
+vista connections test <id>
 vista dashboard
 vista accounts
 vista holdings
@@ -38,6 +41,7 @@ Workflow:
 
 - For current financial answers, run \`vista sync\` first unless the user asks for cached/local data only.
 - Use \`vista status\` for sync health, stale/never-synced state, latest result, and local record counts. Use \`vista sync runs\` for sync history and \`vista sync show <run-id>\` for a specific failure.
+- Use \`vista connections\` and \`vista connections show <id>\` for provider connection management.
 - Use \`vista dashboard\` for net worth/summary, \`vista accounts\` for balances, \`vista holdings\` for investments, \`vista transactions --limit N\` for recent activity, and \`vista income show\` for salary/bonus income by person.
 - If Vista is not initialized, run \`vista init\`. Connect Plaid, HealthEquity, or Coinbase only when the user asks.
 - Summarize command output. Mention sync errors, stale data, or missing data.
