@@ -18,6 +18,7 @@ Commands:
 \`\`\`sh
 vista version --check
 vista init
+vista doctor --json
 vista status
 vista sync
 vista sync runs
@@ -52,6 +53,7 @@ vista upgrade --check
 Workflow:
 
 - For current financial answers, run \`vista sync\` first unless the user asks for cached/local data only.
+- Use \`vista doctor --json\` first when debugging setup, credentials, local DB health, connection readiness, or sync freshness.
 - Use \`vista status\` for sync health, stale/never-synced state, latest result, and local record counts. Use \`vista sync runs\` for sync history and \`vista sync show <run-id>\` for a specific failure.
 - Use \`vista connections\` and \`vista connections show <id>\` for provider connection management.
 - Prefer \`--json\` for commands you need to parse. Use \`vista dashboard --json\` for net worth/summary, \`vista accounts --json\` for balances, \`vista holdings --json\` for investments, \`vista transactions --limit N --json\` for recent activity, and \`vista income show --json\` for salary/bonus income by person.
