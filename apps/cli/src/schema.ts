@@ -257,6 +257,13 @@ create table if not exists holdings (
 create index if not exists holdings_account_idx on holdings(account_id);
 create unique index if not exists holdings_account_key_idx on holdings(account_id, holding_key);
 
+create table if not exists holding_classification_overrides (
+  holding_id text primary key references holdings(id),
+  asset_class text not null check (asset_class in ('cash', 'equity', 'fixed_income', 'crypto', 'fund', 'other')),
+  created_at integer not null,
+  updated_at integer not null
+);
+
 create table if not exists security_price_daily (
   security_id text not null references securities(id),
   price_date text not null,

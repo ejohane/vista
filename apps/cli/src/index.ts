@@ -16,7 +16,11 @@ import {
   parseConnectPlaidArgs,
 } from "./connect-plaid";
 import { printDashboard } from "./dashboard";
-import { listHoldings, printHoldings } from "./holdings";
+import {
+  parseHoldingsArgs,
+  printHoldingsHelp,
+  runHoldingsCommand,
+} from "./holdings";
 import { parseIncomeArgs, printIncomeHelp, runIncomeCommand } from "./income";
 import { openLocalD1Database } from "./local-d1";
 import { ensureLocalSchema } from "./schema";
@@ -49,6 +53,8 @@ Usage:
   vista dashboard
   vista accounts
   vista holdings
+  vista holdings show <id-or-symbol>
+  vista holdings classify <id-or-symbol> --asset-class cash|equity|fixed_income|crypto|fund|other
   vista transactions [--limit 25]
   vista income set --person "Erik" --source "Employer" --salary 150000 [--bonus 25000]
   vista income show [--person "Erik"]
@@ -246,11 +252,21 @@ async function run(argv: string[]) {
   }
 
   if (command === "holdings") {
+    if (
+      subcommand === "help" ||
+      subcommand === "--help" ||
+      subcommand === "-h"
+    ) {
+      printHoldingsHelp();
+      return;
+    }
+
     initializeCliConfig();
     const config = loadCliConfig();
+    const options = parseHoldingsArgs([subcommand, ...rest].filter(Boolean));
 
     await withDatabase(config.databasePath, async (database) => {
-      printHoldings(await listHoldings(database));
+      await runHoldingsCommand(database, options);
     });
     return;
   }

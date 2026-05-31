@@ -22,6 +22,8 @@ vista sync
 vista dashboard
 vista accounts
 vista holdings
+vista holdings show <id-or-symbol>
+vista holdings classify <id-or-symbol> --asset-class cash|equity|fixed_income|crypto|fund|other
 vista transactions --limit 25
 vista income show
 vista income show --person "Name"
@@ -35,6 +37,7 @@ Workflow:
 
 - For current financial answers, run \`vista sync\` first unless the user asks for cached/local data only.
 - Use \`vista dashboard\` for net worth/summary, \`vista accounts\` for balances, \`vista holdings\` for investments, \`vista transactions --limit N\` for recent activity, and \`vista income show\` for salary/bonus income by person.
+- Use \`vista holdings show <id-or-symbol>\` before changing a holding. Use \`vista holdings classify <id> --asset-class <value>\` for local classification overrides; if a symbol is ambiguous, rerun with the exact holding id.
 - If Vista is not initialized, run \`vista init\`. Connect Plaid, HealthEquity, or Coinbase only when the user asks.
 - Summarize command output. Mention sync errors, stale data, or missing data.
 - Do not upgrade Vista, change config, or inspect raw DB files unless asked.
