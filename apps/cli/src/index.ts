@@ -2,7 +2,11 @@
 
 import { dirname } from "node:path";
 
-import { listAccounts, printAccounts } from "./accounts";
+import {
+  parseAccountsArgs,
+  printAccountsHelp,
+  runAccountsCommand,
+} from "./accounts";
 import {
   CONFIG_PATH,
   initializeCliConfig,
@@ -57,6 +61,14 @@ Usage:
   vista sync [--quiet]
   vista dashboard
   vista accounts
+  vista accounts show <id>
+  vista accounts rename <id> "Display Name"
+  vista accounts rename <id> --clear
+  vista accounts hide <id>
+  vista accounts unhide <id>
+  vista accounts include <id>
+  vista accounts exclude <id>
+  vista accounts owner <id> --owner mine|wife|joint
   vista holdings
   vista transactions [--limit 25]
   vista income set --person "Erik" --source "Employer" --salary 150000 [--bonus 25000]
@@ -255,11 +267,21 @@ async function run(argv: string[]) {
   }
 
   if (command === "accounts") {
+    if (
+      subcommand === "help" ||
+      subcommand === "--help" ||
+      subcommand === "-h"
+    ) {
+      printAccountsHelp();
+      return;
+    }
+
     initializeCliConfig();
     const config = loadCliConfig();
+    const options = parseAccountsArgs([subcommand, ...rest].filter(Boolean));
 
     await withDatabase(config.databasePath, async (database) => {
-      printAccounts(await listAccounts(database));
+      await runAccountsCommand(database, options);
     });
     return;
   }
