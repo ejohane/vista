@@ -162,12 +162,17 @@ describe("CLI JSON output", () => {
     const options = parseTransactionArgs(["--json", "--limit", "1"]);
     const transactions: TransactionRow[] = [
       {
+        accountId: "acct_checking",
         accountName: "Checking",
         amountMinor: -1_234,
         currency: "USD",
         description: "Coffee",
+        excludedFromReporting: 0,
+        id: "txn:bank:coffee",
+        institutionName: "Local Bank",
         kind: "bank",
         postedDate: "2026-05-30",
+        providerTransactionId: "provider-bank-coffee",
         quantity: null,
         subtype: "food_and_drink",
         symbol: null,
@@ -175,12 +180,39 @@ describe("CLI JSON output", () => {
       },
     ];
 
-    expect(options).toEqual({ json: true, limit: 1 });
+    expect(options).toEqual({ json: true, limit: 1, mode: "list" });
+    if (options.mode !== "list") {
+      throw new Error("Expected list transaction options.");
+    }
     expect(roundTripJson(toTransactionsJson(transactions, options))).toEqual({
       count: 1,
+      filters: {
+        account: null,
+        kind: null,
+        since: null,
+        until: null,
+      },
       limit: 1,
       schemaVersion: 1,
-      transactions: transactions,
+      transactions: [
+        {
+          accountId: "acct_checking",
+          accountName: "Checking",
+          amountMinor: -1_234,
+          currency: "USD",
+          description: "Coffee",
+          excludedFromReporting: false,
+          id: "bank-28764946",
+          kind: "bank",
+          localId: "txn:bank:coffee",
+          postedDate: "2026-05-30",
+          providerTransactionId: "provider-bank-coffee",
+          quantity: null,
+          subtype: "food_and_drink",
+          symbol: null,
+          type: "debit",
+        },
+      ],
     });
   });
 
