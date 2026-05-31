@@ -19,6 +19,9 @@ Commands:
 vista version --check
 vista init
 vista sync
+vista connections
+vista connections show <id>
+vista connections test <id>
 vista dashboard --json
 vista accounts --json
 vista holdings --json
@@ -34,7 +37,7 @@ vista upgrade --check
 Workflow:
 
 - For current financial answers, run \`vista sync\` first unless the user asks for cached/local data only.
-- Prefer \`--json\` for commands you need to parse. Use \`vista dashboard --json\` for net worth/summary, \`vista accounts --json\` for balances, \`vista holdings --json\` for investments, \`vista transactions --limit N --json\` for recent activity, and \`vista income show --json\` for salary/bonus income by person.
+- Prefer \`--json\` for commands you need to parse. Use \`vista connections\` and \`vista connections show <id>\` for provider connection status. Use \`vista dashboard --json\` for net worth/summary, \`vista accounts --json\` for balances, \`vista holdings --json\` for investments, \`vista transactions --limit N --json\` for recent activity, and \`vista income show --json\` for salary/bonus income by person.
 - If Vista is not initialized, run \`vista init\`. Connect Plaid, HealthEquity, or Coinbase only when the user asks.
 - Summarize command output. Mention sync errors, stale data, or missing data.
 - Do not upgrade Vista, change config, or inspect raw DB files unless asked.
