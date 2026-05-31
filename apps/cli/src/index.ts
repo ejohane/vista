@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 
 import {
@@ -25,6 +26,12 @@ import {
   runConnectionsCommand,
 } from "./connections";
 import { printDashboard, printDashboardJson } from "./dashboard";
+import {
+  getDoctorReport,
+  parseDoctorArgs,
+  printDoctorReport,
+  printDoctorReportJson,
+} from "./doctor";
 import {
   parseHoldingsArgs,
   printHoldingsHelp,
@@ -82,6 +89,7 @@ Usage:
   vista sync runs [--limit 20]
   vista sync show <run-id>
   vista status
+  vista doctor [--json]
   vista dashboard [--json]
   vista accounts [--json]
   vista accounts show <id>
@@ -336,6 +344,46 @@ async function run(argv: string[]) {
 
     await withDatabase(config.databasePath, async (database) => {
       printStatus(await getVistaStatusSummary(database));
+    });
+    return;
+  }
+
+  if (command === "doctor") {
+    const options = parseDoctorArgs([subcommand, ...rest].filter(Boolean));
+    const config = loadCliConfig();
+    const configExists = existsSync(CONFIG_PATH);
+    const databaseExists = existsSync(config.databasePath);
+
+    if (!databaseExists) {
+      const report = await getDoctorReport({
+        config,
+        configExists,
+        databaseExists,
+      });
+
+      if (options.json) {
+        printDoctorReportJson(report);
+        return;
+      }
+
+      printDoctorReport(report);
+      return;
+    }
+
+    await withDatabase(config.databasePath, async (database) => {
+      const report = await getDoctorReport({
+        config,
+        configExists,
+        database,
+        databaseExists,
+      });
+
+      if (options.json) {
+        printDoctorReportJson(report);
+        return;
+      }
+
+      printDoctorReport(report);
     });
     return;
   }
