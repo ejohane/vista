@@ -2,7 +2,11 @@
 
 import { dirname } from "node:path";
 
-import { listAccounts, printAccounts, printAccountsJson } from "./accounts";
+import {
+  parseAccountsArgs,
+  printAccountsHelp,
+  runAccountsCommand,
+} from "./accounts";
 import {
   CONFIG_PATH,
   initializeCliConfig,
@@ -75,6 +79,14 @@ Usage:
   vista status
   vista dashboard [--json]
   vista accounts [--json]
+  vista accounts show <id>
+  vista accounts rename <id> "Display Name"
+  vista accounts rename <id> --clear
+  vista accounts hide <id>
+  vista accounts unhide <id>
+  vista accounts include <id>
+  vista accounts exclude <id>
+  vista accounts owner <id> --owner mine|wife|joint
   vista holdings [--json]
   vista holdings show <id-or-symbol> [--json]
   vista holdings classify <id-or-symbol> --asset-class cash|equity|fixed_income|crypto|fund|other [--json]
@@ -321,22 +333,21 @@ async function run(argv: string[]) {
   }
 
   if (command === "accounts") {
+    if (
+      subcommand === "help" ||
+      subcommand === "--help" ||
+      subcommand === "-h"
+    ) {
+      printAccountsHelp();
+      return;
+    }
+
     initializeCliConfig();
     const config = loadCliConfig();
-    const options = parseJsonOnlyArgs(
-      [subcommand, ...rest].filter(Boolean),
-      command,
-    );
+    const options = parseAccountsArgs([subcommand, ...rest].filter(Boolean));
 
     await withDatabase(config.databasePath, async (database) => {
-      const accounts = await listAccounts(database);
-
-      if (options.json) {
-        printAccountsJson(accounts);
-        return;
-      }
-
-      printAccounts(accounts);
+      await runAccountsCommand(database, options);
     });
     return;
   }

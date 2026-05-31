@@ -27,6 +27,14 @@ vista connections show <id>
 vista connections test <id>
 vista dashboard --json
 vista accounts --json
+vista accounts show <id>
+vista accounts rename <id> "Display Name"
+vista accounts rename <id> --clear
+vista accounts hide <id>
+vista accounts unhide <id>
+vista accounts include <id>
+vista accounts exclude <id>
+vista accounts owner <id> --owner mine|wife|joint
 vista holdings --json
 vista holdings show <id-or-symbol> --json
 vista holdings classify <id-or-symbol> --asset-class cash|equity|fixed_income|crypto|fund|other --json
@@ -45,6 +53,8 @@ Workflow:
 - Use \`vista status\` for sync health, stale/never-synced state, latest result, and local record counts. Use \`vista sync runs\` for sync history and \`vista sync show <run-id>\` for a specific failure.
 - Use \`vista connections\` and \`vista connections show <id>\` for provider connection management.
 - Prefer \`--json\` for commands you need to parse. Use \`vista dashboard --json\` for net worth/summary, \`vista accounts --json\` for balances, \`vista holdings --json\` for investments, \`vista transactions --limit N --json\` for recent activity, and \`vista income show --json\` for salary/bonus income by person.
+- Use \`vista accounts show <id>\` before changing account metadata.
+- Use account mutation commands only when asked. \`hide\` and \`exclude\` both remove an account from dashboard totals; \`rename --clear\` resets the local display name.
 - Use \`vista holdings show <id-or-symbol>\` before changing a holding. Use \`vista holdings classify <id> --asset-class <value>\` for local classification overrides; if a symbol is ambiguous, rerun with the exact holding id.
 - If Vista is not initialized, run \`vista init\`. Connect Plaid, HealthEquity, or Coinbase only when the user asks.
 - Summarize command output. Mention sync errors, stale data, or missing data.
