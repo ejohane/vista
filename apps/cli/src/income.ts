@@ -1,6 +1,7 @@
+import { formatIsoTimestamp, printJson } from "./json-output";
 import type { LocalD1Database } from "./local-d1";
 
-type IncomeCommand =
+export type IncomeCommand =
   | {
       bonusMinor: number;
       effectiveDate: string;
@@ -13,6 +14,7 @@ type IncomeCommand =
     }
   | {
       householdId?: string;
+      json: boolean;
       kind: "show";
       personName?: string;
     }
@@ -34,6 +36,7 @@ type HouseholdCountRow = {
 
 export type IncomeProfileRow = {
   bonusMinor: number;
+  currency: string;
   effectiveDate: string;
   id: string;
   note: null | string;
@@ -206,10 +209,11 @@ export function parseIncomeArgs(argv: string[]): IncomeCommand {
   }
 
   if (command === "show" || command === "summary" || command === "list") {
-    const options = parseFilterOptions(rest, `income ${command}`);
+    const options = parseFilterOptions(rest, `income ${command}`, false, true);
 
     return {
       householdId: options.householdId,
+      json: options.json,
       kind: "show",
       personName: options.personName,
     };
@@ -240,14 +244,17 @@ function parseFilterOptions(
   argv: string[],
   commandName: string,
   allowAll = false,
+  allowJson = false,
 ) {
   const options: {
     all: boolean;
     householdId?: string;
+    json: boolean;
     personName?: string;
     source?: string;
   } = {
     all: false,
+    json: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -273,6 +280,11 @@ function parseFilterOptions(
 
     if (allowAll && arg === "--all") {
       options.all = true;
+      continue;
+    }
+
+    if (allowJson && arg === "--json") {
+      options.json = true;
       continue;
     }
 
@@ -415,6 +427,7 @@ export async function listIncomeProfiles(
           source,
           salary_minor as salaryMinor,
           bonus_minor as bonusMinor,
+          currency,
           effective_date as effectiveDate,
           note,
           updated_at as updatedAt
@@ -480,12 +493,64 @@ export async function runIncomeCommand(
 
   const profiles = await listIncomeProfiles(database, command);
 
+  if (command.json) {
+    printIncomeProfilesJson(profiles);
+    return;
+  }
+
   if (profiles.length === 0) {
     console.log("No income profiles found.");
     return;
   }
 
   printIncomeProfiles(profiles);
+}
+
+export function toIncomeProfilesJson(profiles: IncomeProfileRow[]) {
+  const totals = profiles.reduce(
+    (summary, profile) => {
+      summary.salaryMinor += profile.salaryMinor;
+      summary.bonusMinor += profile.bonusMinor;
+      return summary;
+    },
+    {
+      bonusMinor: 0,
+      salaryMinor: 0,
+    },
+  );
+  const annualMinor = totals.salaryMinor + totals.bonusMinor;
+
+  return {
+    profiles: profiles.map((profile) => {
+      const profileAnnualMinor = profile.salaryMinor + profile.bonusMinor;
+
+      return {
+        annualMinor: profileAnnualMinor,
+        bonusMinor: profile.bonusMinor,
+        currency: profile.currency,
+        effectiveDate: profile.effectiveDate,
+        id: profile.id,
+        monthlyGrossMinor: Math.round(profileAnnualMinor / 12),
+        note: profile.note,
+        personName: profile.personName,
+        salaryMinor: profile.salaryMinor,
+        source: profile.source,
+        updatedAt: formatIsoTimestamp(profile.updatedAt),
+      };
+    }),
+    schemaVersion: 1,
+    totals: {
+      annualMinor,
+      bonusMinor: totals.bonusMinor,
+      currency: "USD",
+      monthlyGrossMinor: Math.round(annualMinor / 12),
+      salaryMinor: totals.salaryMinor,
+    },
+  };
+}
+
+export function printIncomeProfilesJson(profiles: IncomeProfileRow[]) {
+  printJson(toIncomeProfilesJson(profiles));
 }
 
 export function printIncomeProfiles(profiles: IncomeProfileRow[]) {
@@ -546,7 +611,7 @@ export function printIncomeHelp() {
 
 Usage:
   vista income set --person "Erik" --source "Employer" --salary 150000 [--bonus 25000] [--effective-date YYYY-MM-DD] [--note "..."]
-  vista income show [--person "Erik"]
+  vista income show [--person "Erik"] [--json]
   vista income clear --person "Erik" --source "Employer"
   vista income clear --all
 `);

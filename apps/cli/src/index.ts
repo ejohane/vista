@@ -2,7 +2,7 @@
 
 import { dirname } from "node:path";
 
-import { listAccounts, printAccounts } from "./accounts";
+import { listAccounts, printAccounts, printAccountsJson } from "./accounts";
 import {
   CONFIG_PATH,
   initializeCliConfig,
@@ -20,8 +20,12 @@ import {
   printConnectionsHelp,
   runConnectionsCommand,
 } from "./connections";
-import { printDashboard } from "./dashboard";
-import { listHoldings, printHoldings } from "./holdings";
+import { printDashboard, printDashboardJson } from "./dashboard";
+import {
+  parseHoldingsArgs,
+  printHoldingsHelp,
+  runHoldingsCommand,
+} from "./holdings";
 import { parseIncomeArgs, printIncomeHelp, runIncomeCommand } from "./income";
 import { openLocalD1Database } from "./local-d1";
 import { ensureLocalSchema } from "./schema";
@@ -45,6 +49,7 @@ import {
   listTransactions,
   parseTransactionArgs,
   printTransactions,
+  printTransactionsJson,
 } from "./transactions";
 import { parseUpgradeArgs, printVersion, upgradeCli } from "./upgrade";
 
@@ -68,12 +73,14 @@ Usage:
   vista sync runs [--limit 20]
   vista sync show <run-id>
   vista status
-  vista dashboard
-  vista accounts
-  vista holdings
-  vista transactions [--limit 25]
+  vista dashboard [--json]
+  vista accounts [--json]
+  vista holdings [--json]
+  vista holdings show <id-or-symbol> [--json]
+  vista holdings classify <id-or-symbol> --asset-class cash|equity|fixed_income|crypto|fund|other [--json]
+  vista transactions [--limit 25] [--json]
   vista income set --person "Erik" --source "Employer" --salary 150000 [--bonus 25000]
-  vista income show [--person "Erik"]
+  vista income show [--person "Erik"] [--json]
 
 Local files:
   Config: ${CONFIG_PATH}
@@ -83,6 +90,23 @@ Local files:
 
 function commandPath(argv: string[]) {
   return argv.filter(Boolean).join(" ");
+}
+
+function parseJsonOnlyArgs(argv: string[], commandName: string) {
+  const options = {
+    json: false,
+  };
+
+  for (const arg of argv) {
+    if (arg === "--json") {
+      options.json = true;
+      continue;
+    }
+
+    throw new Error(`Unknown ${commandName} option: ${arg}`);
+  }
+
+  return options;
 }
 
 async function withDatabase<T>(
@@ -299,9 +323,20 @@ async function run(argv: string[]) {
   if (command === "accounts") {
     initializeCliConfig();
     const config = loadCliConfig();
+    const options = parseJsonOnlyArgs(
+      [subcommand, ...rest].filter(Boolean),
+      command,
+    );
 
     await withDatabase(config.databasePath, async (database) => {
-      printAccounts(await listAccounts(database));
+      const accounts = await listAccounts(database);
+
+      if (options.json) {
+        printAccountsJson(accounts);
+        return;
+      }
+
+      printAccounts(accounts);
     });
     return;
   }
@@ -309,19 +344,38 @@ async function run(argv: string[]) {
   if (command === "dashboard") {
     initializeCliConfig();
     const config = loadCliConfig();
+    const options = parseJsonOnlyArgs(
+      [subcommand, ...rest].filter(Boolean),
+      command,
+    );
 
     await withDatabase(config.databasePath, async (database) => {
+      if (options.json) {
+        await printDashboardJson(database);
+        return;
+      }
+
       await printDashboard(database);
     });
     return;
   }
 
   if (command === "holdings") {
+    if (
+      subcommand === "help" ||
+      subcommand === "--help" ||
+      subcommand === "-h"
+    ) {
+      printHoldingsHelp();
+      return;
+    }
+
     initializeCliConfig();
     const config = loadCliConfig();
+    const options = parseHoldingsArgs([subcommand, ...rest].filter(Boolean));
 
     await withDatabase(config.databasePath, async (database) => {
-      printHoldings(await listHoldings(database));
+      await runHoldingsCommand(database, options);
     });
     return;
   }
@@ -332,7 +386,14 @@ async function run(argv: string[]) {
     const options = parseTransactionArgs([subcommand, ...rest].filter(Boolean));
 
     await withDatabase(config.databasePath, async (database) => {
-      printTransactions(await listTransactions(database, options), options);
+      const transactions = await listTransactions(database, options);
+
+      if (options.json) {
+        printTransactionsJson(transactions, options);
+        return;
+      }
+
+      printTransactions(transactions, options);
     });
     return;
   }
