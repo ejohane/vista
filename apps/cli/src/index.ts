@@ -52,8 +52,13 @@ import { parseSyncArgs, printSyncResult, syncLocalConnections } from "./sync";
 import {
   listTransactions,
   parseTransactionArgs,
+  printTransactionDetail,
   printTransactions,
+  printTransactionsHelp,
   printTransactionsJson,
+  resolveTransactionListOptions,
+  setBankTransactionReportingOverride,
+  showTransaction,
 } from "./transactions";
 import { parseUpgradeArgs, printVersion, upgradeCli } from "./upgrade";
 
@@ -90,7 +95,10 @@ Usage:
   vista holdings [--json]
   vista holdings show <id-or-symbol> [--json]
   vista holdings classify <id-or-symbol> --asset-class cash|equity|fixed_income|crypto|fund|other [--json]
-  vista transactions [--limit 25] [--json]
+  vista transactions [--limit 25] [--account <id-or-name>] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--kind bank|investment] [--json]
+  vista transactions show <id>
+  vista transactions exclude <id>
+  vista transactions include <id>
   vista income set --person "Erik" --source "Employer" --salary 150000 [--bonus 25000]
   vista income show [--person "Erik"] [--json]
 
@@ -392,19 +400,55 @@ async function run(argv: string[]) {
   }
 
   if (command === "transactions") {
+    if (
+      subcommand === "help" ||
+      subcommand === "--help" ||
+      subcommand === "-h"
+    ) {
+      printTransactionsHelp();
+      return;
+    }
+
     initializeCliConfig();
     const config = loadCliConfig();
     const options = parseTransactionArgs([subcommand, ...rest].filter(Boolean));
 
     await withDatabase(config.databasePath, async (database) => {
-      const transactions = await listTransactions(database, options);
-
-      if (options.json) {
-        printTransactionsJson(transactions, options);
+      if (options.mode === "show") {
+        printTransactionDetail(await showTransaction(database, options.id));
         return;
       }
 
-      printTransactions(transactions, options);
+      if (options.mode === "exclude" || options.mode === "include") {
+        const detail = await setBankTransactionReportingOverride(
+          database,
+          options.id,
+          options.mode === "exclude",
+        );
+        console.log(
+          `Transaction ${options.mode === "exclude" ? "excluded" : "included"} from reporting.`,
+        );
+        console.log("");
+        printTransactionDetail(detail);
+        return;
+      }
+
+      if (options.mode !== "list") {
+        throw new Error(`Unknown transactions command mode: ${options.mode}`);
+      }
+
+      const resolvedOptions = await resolveTransactionListOptions(
+        database,
+        options,
+      );
+      const transactions = await listTransactions(database, resolvedOptions);
+
+      if (resolvedOptions.json) {
+        printTransactionsJson(transactions, resolvedOptions);
+        return;
+      }
+
+      printTransactions(transactions, resolvedOptions);
     });
     return;
   }
