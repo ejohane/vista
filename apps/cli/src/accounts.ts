@@ -1,3 +1,4 @@
+import { formatIsoTimestamp, printJson } from "./json-output";
 import type { LocalD1Database } from "./local-d1";
 
 const OWNERSHIP_TYPES = ["mine", "wife", "joint"] as const;
@@ -30,7 +31,7 @@ export type AccountDetailRow = AccountRow & {
 
 export type AccountCommand =
   | { kind: "help" }
-  | { kind: "list" }
+  | { json: boolean; kind: "list" }
   | { accountId: string; kind: "show" }
   | { accountId: string; displayName: null | string; kind: "rename" }
   | { accountId: string; hidden: boolean; kind: "visibility" }
@@ -85,7 +86,7 @@ function isOwnershipType(value: string): value is OwnershipType {
 export const ACCOUNTS_HELP = `Vista account commands
 
 Usage:
-  vista accounts
+  vista accounts [--json]
   vista accounts show <id>
   vista accounts rename <id> "Display Name"
   vista accounts rename <id> --clear
@@ -104,7 +105,15 @@ export function parseAccountsArgs(argv: string[]): AccountCommand {
   const [subcommand, accountIdArg, ...rest] = argv;
 
   if (!subcommand) {
-    return { kind: "list" };
+    return { json: false, kind: "list" };
+  }
+
+  if (subcommand === "--json") {
+    requireNoExtraArgs(
+      [accountIdArg, ...rest].filter(Boolean),
+      "vista accounts --json",
+    );
+    return { json: true, kind: "list" };
   }
 
   if (subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
@@ -465,7 +474,14 @@ export async function runAccountsCommand(
   }
 
   if (command.kind === "list") {
-    printAccounts(await listAccounts(database));
+    const accounts = await listAccounts(database);
+
+    if (command.json) {
+      printAccountsJson(accounts);
+      return;
+    }
+
+    printAccounts(accounts);
     return;
   }
 
@@ -516,4 +532,53 @@ export async function runAccountsCommand(
     command.ownershipType,
   );
   printUpdatedAccount(account, "Updated account owner");
+}
+
+export function toAccountsJson(accounts: AccountRow[]) {
+  const totals = accounts.reduce(
+    (summary, account) => {
+      if (account.includeInHouseholdReporting === 0 || account.isHidden === 1) {
+        return summary;
+      }
+
+      summary[account.reportingGroup] += account.balanceMinor;
+      return summary;
+    },
+    {
+      cash: 0,
+      investments: 0,
+      liabilities: 0,
+    } satisfies Record<AccountRow["reportingGroup"], number>,
+  );
+  const netWorthMinor = totals.cash + totals.investments + totals.liabilities;
+
+  return {
+    accounts: accounts.map((account) => ({
+      accountSubtype: account.accountSubtype,
+      accountType: account.accountType,
+      balanceMinor: account.balanceMinor,
+      currency: account.currency,
+      displayName: account.displayName,
+      id: account.id,
+      includeInHouseholdReporting: account.includeInHouseholdReporting === 1,
+      institutionName: account.institutionName,
+      isHidden: account.isHidden === 1,
+      name: account.name,
+      ownershipType: account.ownershipType,
+      reportingGroup: account.reportingGroup,
+      updatedAt: formatIsoTimestamp(account.updatedAt),
+    })),
+    schemaVersion: 1,
+    totals: {
+      cashMinor: totals.cash,
+      currency: "USD",
+      investmentsMinor: totals.investments,
+      liabilitiesMinor: totals.liabilities,
+      netWorthMinor,
+    },
+  };
+}
+
+export function printAccountsJson(accounts: AccountRow[]) {
+  printJson(toAccountsJson(accounts));
 }

@@ -175,7 +175,11 @@ function captureConsole(callback: () => void) {
 
 describe("accounts CLI curation", () => {
   test("parses supported account curation commands", () => {
-    expect(parseAccountsArgs([])).toEqual({ kind: "list" });
+    expect(parseAccountsArgs([])).toEqual({ json: false, kind: "list" });
+    expect(parseAccountsArgs(["--json"])).toEqual({
+      json: true,
+      kind: "list",
+    });
     expect(parseAccountsArgs(["show", "acct_checking"])).toEqual({
       accountId: "acct_checking",
       kind: "show",
