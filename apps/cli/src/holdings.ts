@@ -1,3 +1,4 @@
+import { formatIsoTimestamp, printJson } from "./json-output";
 import type { LocalD1Database } from "./local-d1";
 
 export const HOLDING_ASSET_CLASSES = [
@@ -51,15 +52,18 @@ type HoldingMatch = {
 
 export type HoldingsCommand =
   | {
+      json: boolean;
       kind: "list";
     }
   | {
       identifier: string;
+      json: boolean;
       kind: "show";
     }
   | {
       assetClass: HoldingAssetClass;
       identifier: string;
+      json: boolean;
       kind: "classify";
     };
 
@@ -114,8 +118,28 @@ function parseAssetClass(value: string | undefined) {
   return value;
 }
 
+function parseJsonFlag(args: string[]) {
+  const filteredArgs: string[] = [];
+  let json = false;
+
+  for (const arg of args) {
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+
+    filteredArgs.push(arg);
+  }
+
+  return {
+    args: filteredArgs,
+    json,
+  };
+}
+
 export function parseHoldingsArgs(argv: string[]): HoldingsCommand {
-  const [command, ...rest] = argv;
+  const { args, json } = parseJsonFlag(argv);
+  const [command, ...rest] = args;
 
   if (
     !command ||
@@ -129,7 +153,7 @@ export function parseHoldingsArgs(argv: string[]): HoldingsCommand {
       );
     }
 
-    return { kind: "list" };
+    return { json, kind: "list" };
   }
 
   if (command === "show") {
@@ -145,6 +169,7 @@ export function parseHoldingsArgs(argv: string[]): HoldingsCommand {
 
     return {
       identifier,
+      json,
       kind: "show",
     };
   }
@@ -177,6 +202,7 @@ export function parseHoldingsArgs(argv: string[]): HoldingsCommand {
     return {
       assetClass: parseAssetClass(values.assetClass),
       identifier,
+      json,
       kind: "classify",
     };
   }
@@ -436,13 +462,74 @@ export function printHoldingDetail(holding: HoldingDetail) {
   );
 }
 
+export function toHoldingsJson(holdings: HoldingRow[]) {
+  const marketValueMinor = holdings.reduce(
+    (total, holding) => total + holding.marketValueMinor,
+    0,
+  );
+  const costBasisMinor = holdings.reduce(
+    (total, holding) => total + (holding.costBasisMinor ?? 0),
+    0,
+  );
+
+  return {
+    holdings: holdings.map((holding) => ({
+      accountName: holding.accountName,
+      assetClass: holding.assetClass,
+      costBasisMinor: holding.costBasisMinor,
+      currency: holding.currency,
+      id: holding.id,
+      marketValueMinor: holding.marketValueMinor,
+      name: holding.name,
+      priceMinor: holding.priceMinor,
+      quantity: holding.quantity,
+      symbol: holding.symbol,
+    })),
+    schemaVersion: 1,
+    totals: {
+      costBasisMinor,
+      currency: "USD",
+      marketValueMinor,
+    },
+  };
+}
+
+export function printHoldingsJson(holdings: HoldingRow[]) {
+  printJson(toHoldingsJson(holdings));
+}
+
+export function toHoldingDetailJson(holding: HoldingDetail) {
+  return {
+    accountId: holding.accountId,
+    accountName: holding.accountName,
+    assetClass: holding.assetClass,
+    costBasisMinor: holding.costBasisMinor,
+    currency: holding.currency,
+    holdingId: holding.holdingId,
+    marketValueMinor: holding.marketValueMinor,
+    name: holding.name,
+    overrideAssetClass: holding.overrideAssetClass,
+    priceMinor: holding.priceMinor,
+    providerAssetClass: holding.providerAssetClass,
+    quantity: holding.quantity,
+    schemaVersion: 1,
+    snapshotCapturedAt: formatIsoTimestamp(holding.snapshotCapturedAt),
+    symbol: holding.symbol,
+    updatedAt: formatIsoTimestamp(holding.updatedAt),
+  };
+}
+
+export function printHoldingDetailJson(holding: HoldingDetail) {
+  printJson(toHoldingDetailJson(holding));
+}
+
 export function printHoldingsHelp() {
   console.log(`Vista holdings commands
 
 Usage:
-  vista holdings
-  vista holdings show <id-or-symbol>
-  vista holdings classify <id-or-symbol> --asset-class cash|equity|fixed_income|crypto|fund|other
+  vista holdings [--json]
+  vista holdings show <id-or-symbol> [--json]
+  vista holdings classify <id-or-symbol> --asset-class cash|equity|fixed_income|crypto|fund|other [--json]
 `);
 }
 
@@ -451,12 +538,24 @@ export async function runHoldingsCommand(
   command: HoldingsCommand,
 ) {
   if (command.kind === "list") {
-    printHoldings(await listHoldings(database));
+    const holdings = await listHoldings(database);
+    if (command.json) {
+      printHoldingsJson(holdings);
+      return;
+    }
+
+    printHoldings(holdings);
     return;
   }
 
   if (command.kind === "show") {
-    printHoldingDetail(await getHolding(database, command.identifier));
+    const holding = await getHolding(database, command.identifier);
+    if (command.json) {
+      printHoldingDetailJson(holding);
+      return;
+    }
+
+    printHoldingDetail(holding);
     return;
   }
 
@@ -465,6 +564,11 @@ export async function runHoldingsCommand(
     command.identifier,
     command.assetClass,
   );
+
+  if (command.json) {
+    printHoldingDetailJson(holding);
+    return;
+  }
 
   console.log("Saved holding classification override.");
   printHoldingDetail(holding);
