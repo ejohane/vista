@@ -1,6 +1,7 @@
+import { formatIsoTimestamp, printJson } from "./json-output";
 import type { LocalD1Database } from "./local-d1";
 
-type AccountRow = {
+export type AccountRow = {
   accountSubtype: null | string;
   accountType: string;
   balanceMinor: number;
@@ -132,4 +133,52 @@ export function printAccounts(accounts: AccountRow[]) {
       ].join(""),
     );
   }
+}
+
+export function toAccountsJson(accounts: AccountRow[]) {
+  const totals = accounts.reduce(
+    (summary, account) => {
+      if (account.includeInHouseholdReporting === 0 || account.isHidden === 1) {
+        return summary;
+      }
+
+      summary[account.reportingGroup] += account.balanceMinor;
+      return summary;
+    },
+    {
+      cash: 0,
+      investments: 0,
+      liabilities: 0,
+    } satisfies Record<AccountRow["reportingGroup"], number>,
+  );
+  const netWorthMinor = totals.cash + totals.investments + totals.liabilities;
+
+  return {
+    accounts: accounts.map((account) => ({
+      accountSubtype: account.accountSubtype,
+      accountType: account.accountType,
+      balanceMinor: account.balanceMinor,
+      currency: account.currency,
+      displayName: account.displayName,
+      id: account.id,
+      includeInHouseholdReporting: account.includeInHouseholdReporting === 1,
+      institutionName: account.institutionName,
+      isHidden: account.isHidden === 1,
+      name: account.name,
+      reportingGroup: account.reportingGroup,
+      updatedAt: formatIsoTimestamp(account.updatedAt),
+    })),
+    schemaVersion: 1,
+    totals: {
+      cashMinor: totals.cash,
+      currency: "USD",
+      investmentsMinor: totals.investments,
+      liabilitiesMinor: totals.liabilities,
+      netWorthMinor,
+    },
+  };
+}
+
+export function printAccountsJson(accounts: AccountRow[]) {
+  printJson(toAccountsJson(accounts));
 }

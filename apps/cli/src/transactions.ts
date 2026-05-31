@@ -1,12 +1,15 @@
+import { printJson } from "./json-output";
 import type { LocalD1Database } from "./local-d1";
 
-type TransactionOptions = {
+export type TransactionOptions = {
+  json: boolean;
   limit: number;
 };
 
-type TransactionRow = {
+export type TransactionRow = {
   accountName: string;
   amountMinor: number;
+  currency: string;
   description: string;
   kind: "bank" | "investment";
   postedDate: string;
@@ -31,6 +34,7 @@ function pad(value: string, length: number) {
 
 export function parseTransactionArgs(argv: string[]): TransactionOptions {
   const options: TransactionOptions = {
+    json: false,
     limit: DEFAULT_TRANSACTION_LIMIT,
   };
 
@@ -40,6 +44,11 @@ export function parseTransactionArgs(argv: string[]): TransactionOptions {
     if (arg === "--limit") {
       index += 1;
       options.limit = Number(argv[index]);
+      continue;
+    }
+
+    if (arg === "--json") {
+      options.json = true;
       continue;
     }
 
@@ -70,6 +79,7 @@ export async function listTransactions(
             t.direction as type,
             t.category_normalized as subtype,
             t.amount_minor as amountMinor,
+            a.currency as currency,
             null as quantity,
             null as symbol,
             t.posted_at as postedAt
@@ -86,6 +96,7 @@ export async function listTransactions(
             it.type as type,
             it.subtype as subtype,
             it.amount_minor as amountMinor,
+            it.currency as currency,
             it.quantity as quantity,
             s.symbol as symbol,
             it.posted_at as postedAt
@@ -144,4 +155,34 @@ export function printTransactions(
       ].join(""),
     );
   }
+}
+
+export function toTransactionsJson(
+  transactions: TransactionRow[],
+  options: TransactionOptions,
+) {
+  return {
+    count: transactions.length,
+    limit: options.limit,
+    schemaVersion: 1,
+    transactions: transactions.map((transaction) => ({
+      accountName: transaction.accountName,
+      amountMinor: transaction.amountMinor,
+      currency: transaction.currency,
+      description: transaction.description,
+      kind: transaction.kind,
+      postedDate: transaction.postedDate,
+      quantity: transaction.quantity,
+      subtype: transaction.subtype,
+      symbol: transaction.symbol,
+      type: transaction.type,
+    })),
+  };
+}
+
+export function printTransactionsJson(
+  transactions: TransactionRow[],
+  options: TransactionOptions,
+) {
+  printJson(toTransactionsJson(transactions, options));
 }

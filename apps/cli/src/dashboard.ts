@@ -1,6 +1,7 @@
+import { formatIsoTimestamp, printJson } from "./json-output";
 import type { LocalD1Database } from "./local-d1";
 
-type DashboardSummary = {
+export type DashboardSummary = {
   accountCount: number;
   bankTransactionCount: number;
   cashMinor: number;
@@ -13,7 +14,7 @@ type DashboardSummary = {
   liabilitiesMinor: number;
 };
 
-type ConnectionRow = {
+export type DashboardConnectionRow = {
   institutionName: string;
   lastCompletedSyncAt: null | number;
   status: string;
@@ -90,7 +91,7 @@ export async function listDashboardConnections(database: LocalD1Database) {
         order by pc.institution_name asc, pc.id asc
       `,
     )
-    .all<ConnectionRow>();
+    .all<DashboardConnectionRow>();
 
   return rows.results;
 }
@@ -156,4 +157,53 @@ export async function printDashboard(database: LocalD1Database) {
       ].join(""),
     );
   }
+}
+
+export async function getDashboardData(database: LocalD1Database) {
+  return {
+    connections: await listDashboardConnections(database),
+    summary: await getDashboardSummary(database),
+  };
+}
+
+export function toDashboardJson(data: {
+  connections: DashboardConnectionRow[];
+  summary: DashboardSummary | null;
+}) {
+  const netWorthMinor = data.summary
+    ? data.summary.cashMinor +
+      data.summary.investmentsMinor +
+      data.summary.liabilitiesMinor
+    : 0;
+
+  return {
+    connections: data.connections.map((connection) => ({
+      institutionName: connection.institutionName,
+      lastCompletedSyncAt: formatIsoTimestamp(connection.lastCompletedSyncAt),
+      status: connection.status,
+    })),
+    schemaVersion: 1,
+    summary: data.summary
+      ? {
+          accountCount: data.summary.accountCount,
+          bankTransactionCount: data.summary.bankTransactionCount,
+          cashMinor: data.summary.cashMinor,
+          connectionCount: data.summary.connectionCount,
+          currency: "USD",
+          holdingCount: data.summary.holdingCount,
+          investmentTransactionCount: data.summary.investmentTransactionCount,
+          investmentsMinor: data.summary.investmentsMinor,
+          lastCompletedSyncAt: formatIsoTimestamp(
+            data.summary.lastCompletedSyncAt,
+          ),
+          lastFailedSyncAt: formatIsoTimestamp(data.summary.lastFailedSyncAt),
+          liabilitiesMinor: data.summary.liabilitiesMinor,
+          netWorthMinor,
+        }
+      : null,
+  };
+}
+
+export async function printDashboardJson(database: LocalD1Database) {
+  printJson(toDashboardJson(await getDashboardData(database)));
 }

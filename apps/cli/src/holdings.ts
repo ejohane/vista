@@ -1,9 +1,11 @@
+import { printJson } from "./json-output";
 import type { LocalD1Database } from "./local-d1";
 
-type HoldingRow = {
+export type HoldingRow = {
   accountName: string;
   assetClass: string;
   costBasisMinor: null | number;
+  currency: string;
   marketValueMinor: number;
   name: string;
   priceMinor: null | number;
@@ -35,6 +37,7 @@ export async function listHoldings(database: LocalD1Database) {
           h.symbol,
           h.name,
           h.asset_class as assetClass,
+          h.currency,
           hs.quantity,
           hs.price_minor as priceMinor,
           hs.market_value_minor as marketValueMinor,
@@ -100,4 +103,39 @@ export function printHoldings(holdings: HoldingRow[]) {
       ].join(""),
     );
   }
+}
+
+export function toHoldingsJson(holdings: HoldingRow[]) {
+  const marketValueMinor = holdings.reduce(
+    (total, holding) => total + holding.marketValueMinor,
+    0,
+  );
+  const costBasisMinor = holdings.reduce(
+    (total, holding) => total + (holding.costBasisMinor ?? 0),
+    0,
+  );
+
+  return {
+    holdings: holdings.map((holding) => ({
+      accountName: holding.accountName,
+      assetClass: holding.assetClass,
+      costBasisMinor: holding.costBasisMinor,
+      currency: holding.currency,
+      marketValueMinor: holding.marketValueMinor,
+      name: holding.name,
+      priceMinor: holding.priceMinor,
+      quantity: holding.quantity,
+      symbol: holding.symbol,
+    })),
+    schemaVersion: 1,
+    totals: {
+      costBasisMinor,
+      currency: "USD",
+      marketValueMinor,
+    },
+  };
+}
+
+export function printHoldingsJson(holdings: HoldingRow[]) {
+  printJson(toHoldingsJson(holdings));
 }
