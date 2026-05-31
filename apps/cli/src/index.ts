@@ -25,6 +25,16 @@ import {
   printSkillHelp,
   VISTA_SKILL_CONTENT,
 } from "./skill";
+import {
+  getSyncRun,
+  getVistaStatusSummary,
+  listSyncRuns,
+  parseSyncRunsArgs,
+  parseSyncShowArgs,
+  printStatus,
+  printSyncRun,
+  printSyncRuns,
+} from "./status";
 import { parseSyncArgs, printSyncResult, syncLocalConnections } from "./sync";
 import {
   listTransactions,
@@ -46,6 +56,9 @@ Usage:
   vista connect healthequity [--no-open] [--timeout-seconds 600]
   vista connect coinbase --api-key-file <path>
   vista sync [--quiet]
+  vista sync runs [--limit 20]
+  vista sync show <run-id>
+  vista status
   vista dashboard
   vista accounts
   vista holdings
@@ -212,6 +225,25 @@ async function run(argv: string[]) {
   if (command === "sync") {
     initializeCliConfig();
     const config = loadCliConfig();
+
+    if (subcommand === "runs") {
+      const options = parseSyncRunsArgs(rest);
+
+      await withDatabase(config.databasePath, async (database) => {
+        printSyncRuns(await listSyncRuns(database, options));
+      });
+      return;
+    }
+
+    if (subcommand === "show") {
+      const options = parseSyncShowArgs(rest);
+
+      await withDatabase(config.databasePath, async (database) => {
+        printSyncRun(await getSyncRun(database, options.runId));
+      });
+      return;
+    }
+
     const options = parseSyncArgs([subcommand, ...rest].filter(Boolean));
 
     await withDatabase(config.databasePath, async (database) => {
@@ -221,6 +253,16 @@ async function run(argv: string[]) {
       });
 
       printSyncResult(results, options);
+    });
+    return;
+  }
+
+  if (command === "status") {
+    initializeCliConfig();
+    const config = loadCliConfig();
+
+    await withDatabase(config.databasePath, async (database) => {
+      printStatus(await getVistaStatusSummary(database));
     });
     return;
   }
