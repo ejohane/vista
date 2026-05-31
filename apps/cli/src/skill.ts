@@ -25,6 +25,8 @@ vista connections test <id>
 vista dashboard --json
 vista accounts --json
 vista holdings --json
+vista holdings show <id-or-symbol> --json
+vista holdings classify <id-or-symbol> --asset-class cash|equity|fixed_income|crypto|fund|other --json
 vista transactions --limit 25 --json
 vista income show --json
 vista income show --person "Name" --json
@@ -38,6 +40,7 @@ Workflow:
 
 - For current financial answers, run \`vista sync\` first unless the user asks for cached/local data only.
 - Prefer \`--json\` for commands you need to parse. Use \`vista connections\` and \`vista connections show <id>\` for provider connection status. Use \`vista dashboard --json\` for net worth/summary, \`vista accounts --json\` for balances, \`vista holdings --json\` for investments, \`vista transactions --limit N --json\` for recent activity, and \`vista income show --json\` for salary/bonus income by person.
+- Use \`vista holdings show <id-or-symbol>\` before changing a holding. Use \`vista holdings classify <id> --asset-class <value>\` for local classification overrides; if a symbol is ambiguous, rerun with the exact holding id.
 - If Vista is not initialized, run \`vista init\`. Connect Plaid, HealthEquity, or Coinbase only when the user asks.
 - Summarize command output. Mention sync errors, stale data, or missing data.
 - Do not upgrade Vista, change config, or inspect raw DB files unless asked.

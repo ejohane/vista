@@ -8,6 +8,8 @@ Supported commands:
 vista dashboard --json
 vista accounts --json
 vista holdings --json
+vista holdings show <id-or-symbol> --json
+vista holdings classify <id-or-symbol> --asset-class fund --json
 vista transactions --json --limit 25
 vista income show --json
 vista income show --json --person "Name"
@@ -92,6 +94,7 @@ vista income show --json --person "Name"
     currency: "USD";
   };
   holdings: Array<{
+    id: string;
     accountName: string;
     symbol: string | null;
     name: string;
@@ -102,6 +105,31 @@ vista income show --json --person "Name"
     costBasisMinor: number | null;
     currency: string;
   }>;
+}
+```
+
+`vista holdings show <id-or-symbol> --json`
+
+`vista holdings classify <id-or-symbol> --asset-class <value> --json`
+
+```ts
+{
+  schemaVersion: 1;
+  holdingId: string;
+  accountId: string;
+  accountName: string;
+  symbol: string | null;
+  name: string;
+  providerAssetClass: string;
+  overrideAssetClass: string | null;
+  assetClass: string;
+  quantity: string | null;
+  priceMinor: number | null;
+  marketValueMinor: number | null;
+  costBasisMinor: number | null;
+  currency: string;
+  updatedAt: string;
+  snapshotCapturedAt: string | null;
 }
 ```
 

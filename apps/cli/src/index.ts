@@ -21,7 +21,11 @@ import {
   runConnectionsCommand,
 } from "./connections";
 import { printDashboard, printDashboardJson } from "./dashboard";
-import { listHoldings, printHoldings, printHoldingsJson } from "./holdings";
+import {
+  parseHoldingsArgs,
+  printHoldingsHelp,
+  runHoldingsCommand,
+} from "./holdings";
 import { parseIncomeArgs, printIncomeHelp, runIncomeCommand } from "./income";
 import { openLocalD1Database } from "./local-d1";
 import { ensureLocalSchema } from "./schema";
@@ -59,6 +63,8 @@ Usage:
   vista dashboard [--json]
   vista accounts [--json]
   vista holdings [--json]
+  vista holdings show <id-or-symbol> [--json]
+  vista holdings classify <id-or-symbol> --asset-class cash|equity|fixed_income|crypto|fund|other [--json]
   vista transactions [--limit 25] [--json]
   vista income set --person "Erik" --source "Employer" --salary 150000 [--bonus 25000]
   vista income show [--person "Erik"] [--json]
@@ -313,22 +319,21 @@ async function run(argv: string[]) {
   }
 
   if (command === "holdings") {
+    if (
+      subcommand === "help" ||
+      subcommand === "--help" ||
+      subcommand === "-h"
+    ) {
+      printHoldingsHelp();
+      return;
+    }
+
     initializeCliConfig();
     const config = loadCliConfig();
-    const options = parseJsonOnlyArgs(
-      [subcommand, ...rest].filter(Boolean),
-      command,
-    );
+    const options = parseHoldingsArgs([subcommand, ...rest].filter(Boolean));
 
     await withDatabase(config.databasePath, async (database) => {
-      const holdings = await listHoldings(database);
-
-      if (options.json) {
-        printHoldingsJson(holdings);
-        return;
-      }
-
-      printHoldings(holdings);
+      await runHoldingsCommand(database, options);
     });
     return;
   }
